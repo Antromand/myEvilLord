@@ -1,0 +1,30 @@
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+
+# Operating system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editors and IDEs
+.idea/
+.vscode/
+*.user
+*.suo
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+.cache/
+
+# Dependencies, builds, and test output
+node_modules/
+build/
+dist/
+out/
+coverage/
