@@ -28,3 +28,6 @@ build/
 dist/
 out/
 coverage/
+
+# Godot generated data
+.godot/
