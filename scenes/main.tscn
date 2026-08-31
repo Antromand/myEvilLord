@@ -1,0 +1,156 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/board.gd" id="2_board"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="Board" type="Node2D" parent="."]
+position = Vector2(24, 168)
+script = ExtResource("2_board")
+
+[node name="MoveTimer" type="Timer" parent="."]
+wait_time = 0.3
+
+[node name="CombatTimer" type="Timer" parent="."]
+wait_time = 0.45
+
+[node name="BuildTimer" type="Timer" parent="."]
+wait_time = 1.0
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="TopBar" type="ColorRect" parent="HUD"]
+offset_right = 1280.0
+offset_bottom = 144.0
+color = Color(0.075, 0.045, 0.09, 1)
+mouse_filter = 2
+
+[node name="Title" type="Label" parent="HUD/TopBar"]
+offset_left = 24.0
+offset_top = 14.0
+offset_right = 660.0
+offset_bottom = 48.0
+theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
+theme_override_font_sizes/font_size = 26
+text = "MY EVIL LORD — GRAYBOX v0.1"
+
+[node name="StatusLabel" type="Label" parent="HUD/TopBar"]
+offset_left = 24.0
+offset_top = 58.0
+offset_right = 390.0
+offset_bottom = 86.0
+theme_override_colors/font_color = Color(0.87, 0.82, 0.9, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="ResourceLabel" type="Label" parent="HUD/TopBar"]
+offset_left = 410.0
+offset_top = 58.0
+offset_right = 645.0
+offset_bottom = 86.0
+theme_override_colors/font_color = Color(0.69, 0.94, 0.82, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="TimerLabel" type="Label" parent="HUD/TopBar"]
+offset_left = 650.0
+offset_top = 58.0
+offset_right = 825.0
+offset_bottom = 86.0
+theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="HeroLabel" type="Label" parent="HUD/TopBar"]
+offset_left = 830.0
+offset_top = 58.0
+offset_right = 995.0
+offset_bottom = 86.0
+theme_override_colors/font_color = Color(0.95, 0.43, 0.37, 1)
+theme_override_font_sizes/font_size = 18
+
+[node name="HintLabel" type="Label" parent="HUD/TopBar"]
+offset_left = 24.0
+offset_top = 103.0
+offset_right = 995.0
+offset_bottom = 130.0
+theme_override_colors/font_color = Color(0.67, 0.62, 0.7, 1)
+theme_override_font_sizes/font_size = 15
+
+[node name="RightPanel" type="ColorRect" parent="HUD"]
+offset_left = 1008.0
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0.065, 0.04, 0.078, 1)
+
+[node name="InstructionTitle" type="Label" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 24.0
+offset_right = 252.0
+offset_bottom = 52.0
+theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
+theme_override_font_sizes/font_size = 20
+text = "КАК ИГРАТЬ"
+
+[node name="InstructionLabel" type="Label" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 62.0
+offset_right = 252.0
+offset_bottom = 220.0
+theme_override_colors/font_color = Color(0.8, 0.76, 0.83, 1)
+theme_override_font_sizes/font_size = 15
+text = "1 / ЛКМ — копать\n2 / ЛКМ — защитник\nПКМ — убрать защитника\nEnter — начать вторжение\nR — перезапустить\n\nФиолетовая руда даёт мрак.\nГерой идёт по кратчайшему\nжёлтому маршруту."
+
+[node name="DigButton" type="Button" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 270.0
+offset_right = 252.0
+offset_bottom = 316.0
+theme_override_font_sizes/font_size = 17
+text = "1  КОПАТЬ"
+
+[node name="DefenderButton" type="Button" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 328.0
+offset_right = 252.0
+offset_bottom = 374.0
+theme_override_font_sizes/font_size = 17
+text = "2  ЗАЩИТНИК"
+
+[node name="StartButton" type="Button" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 404.0
+offset_right = 252.0
+offset_bottom = 456.0
+theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
+theme_override_font_sizes/font_size = 17
+text = "НАЧАТЬ ВТОРЖЕНИЕ"
+
+[node name="RestartButton" type="Button" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 468.0
+offset_right = 252.0
+offset_bottom = 514.0
+theme_override_font_sizes/font_size = 16
+text = "ПЕРЕЗАПУСТИТЬ"
+
+[node name="OutcomeLabel" type="Label" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 536.0
+offset_right = 252.0
+offset_bottom = 660.0
+theme_override_colors/font_color = Color(0.8, 0.76, 0.83, 1)
+theme_override_font_sizes/font_size = 17
+text = "Подготовьте подземелье."
+horizontal_alignment = 1
+vertical_alignment = 1
+autowrap_mode = 3
+
+[node name="VersionLabel" type="Label" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 684.0
+offset_right = 252.0
+offset_bottom = 708.0
+theme_override_colors/font_color = Color(0.39, 0.35, 0.42, 1)
+theme_override_font_sizes/font_size = 12
+text = "Godot 4.7.2 • playable slice"
+horizontal_alignment = 1
