@@ -18,7 +18,7 @@ func _run() -> void:
 
 	_test_route_and_economy(packed_scene)
 	_test_loss_without_defenders(packed_scene)
-	_test_two_defender_win(packed_scene)
+	_test_three_wave_win(packed_scene)
 	_finish()
 
 
@@ -26,6 +26,7 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 	var game := _create_game(packed_scene)
 	var board: GrayboxBoard = game.get_node("Board")
 
+	_check(int(game.call("debug_get_darkness")) == 999, "Каждый отладочный запуск начинается с 999 мрака.")
 	_check(GrayboxBoard.WIDTH == 64 and GrayboxBoard.HEIGHT == 128, "Размер уровня уменьшен до 64×128 клеток.")
 	_check(GrayboxBoard.VIEW_WIDTH == 32 and GrayboxBoard.VIEW_HEIGHT == 16, "Камера показывает 32×16 клеток.")
 	_check(board.entrance_cell.y == 0, "Вторжение начинается на верхней границе.")
@@ -74,16 +75,22 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 	game.call("_on_board_cell_clicked", ore_cell)
 	_check(int(game.call("debug_get_darkness")) == 7, "Руда даёт чистый прирост 3 после стоимости копания.")
 
-	game.call("debug_set_darkness", 15)
+	game.call("debug_set_darkness", 998)
 	game.call("debug_generate_darkness_tick")
 	game.call("debug_generate_darkness_tick")
-	_check(int(game.call("debug_get_darkness")) == 16, "Пассивная генерация останавливается на лимите 16.")
+	_check(int(game.call("debug_get_darkness")) == 999, "Пассивная генерация останавливается на отладочном лимите 999.")
 
 	game.call("_on_board_cell_clicked", board.lord_cell)
 	_check(
 		int(game.get("selected_mode")) == GrayboxBoard.InteractionMode.MOVE_LORD,
 		"Клик по Владыке включает режим его переноса."
 	)
+	game.call("_on_board_cell_clicked", board.lord_cell)
+	_check(
+		int(game.get("selected_mode")) == GrayboxBoard.InteractionMode.DIG,
+		"Повторный клик по Владыке выключает режим его переноса."
+	)
+	game.call("_on_board_cell_clicked", board.lord_cell)
 	game.call("_on_board_cell_clicked", plain_dirt)
 	_check(board.lord_cell == plain_dirt, "До вторжения Владыка переносится в свободную клетку.")
 
@@ -104,6 +111,10 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 	board.call("_process", 1.0)
 	_check(board.get_surface_knight_position() == paused_position, "Активная пауза замораживает подход к пещере.")
 	_check(bool(game.get("game_paused")), "Состояние активной паузы включено.")
+	game.call("debug_set_darkness", 999)
+	var pause_dig_cell := Vector2i(GrayboxBoard.ENTRANCE_X + 1, 1)
+	game.call("_on_board_cell_clicked", pause_dig_cell)
+	_check(board.get_cell_type(pause_dig_cell) != GrayboxBoard.CellType.FLOOR, "Во время паузы строить нельзя.")
 
 	game.call("_set_mode", GrayboxBoard.InteractionMode.MOVE_LORD)
 	game.call("_on_board_cell_clicked", Vector2i(GrayboxBoard.ENTRANCE_X, 2))
@@ -118,9 +129,8 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 	game.call("_toggle_pause")
 	game.call("_set_mode", GrayboxBoard.InteractionMode.DIG)
 	game.call("debug_set_darkness", 4)
-	var pause_dig_cell := Vector2i(GrayboxBoard.ENTRANCE_X + 1, 1)
 	game.call("_on_board_cell_clicked", pause_dig_cell)
-	_check(board.get_cell_type(pause_dig_cell) == GrayboxBoard.CellType.FLOOR, "На активной паузе вторжения можно копать.")
+	_check(board.get_cell_type(pause_dig_cell) != GrayboxBoard.CellType.FLOOR, "На паузе вторжения доступен только осмотр.")
 	game.call("_toggle_pause")
 
 	for button_name in ["DigButton", "DefenderButton", "MoveLordButton", "PauseButton", "StartButton", "RestartButton"]:
@@ -138,24 +148,22 @@ func _test_loss_without_defenders(packed_scene: PackedScene) -> void:
 	_destroy_game(game)
 
 
-func _test_two_defender_win(packed_scene: PackedScene) -> void:
+func _test_three_wave_win(packed_scene: PackedScene) -> void:
 	var game := _create_game(packed_scene)
 	var board: GrayboxBoard = game.get_node("Board")
 	var route := board.build_wandering_route(board.entrance_cell, board.lord_cell, TEST_SEED)
-	var placed := 0
-	var occupied: Dictionary = {}
+	var placed := false
 	for cell in route:
-		if placed >= 2:
+		if board.can_place_defender(cell) and board.place_defender(cell, 99):
+			placed = true
 			break
-		if board.can_place_defender(cell) and not occupied.has(cell):
-			occupied[cell] = true
-			if board.place_defender(cell, 3):
-				placed += 1
-	_check(placed == 2, "Два защитника поставлены на блуждающий маршрут.")
+	_check(placed, "Усиленный тестовый защитник поставлен на маршрут трёх волн.")
 
 	game.call("_start_assault")
 	game.call("debug_run_to_completion")
-	_check(game.call("_phase_title") == "ПОБЕДА", "Два защитника останавливают героя.")
+	_check(game.call("_phase_title") == "ПОБЕДА", "Защита останавливает все три волны.")
+	_check(int(game.get("defeated_attackers")) == 6, "В волнах последовательно уничтожены 1 + 2 + 3 вторженца.")
+	_check(int(game.get("current_wave")) == 3, "Победа наступает после третьей волны.")
 	_destroy_game(game)
 
 

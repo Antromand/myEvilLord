@@ -1,45 +1,46 @@
-[gd_scene load_steps=3 format=3]
+[gd_scene format=3 uid="uid://dgqk836x5wc0o"]
 
-[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
-[ext_resource type="Script" path="res://scripts/board.gd" id="2_board"]
+[ext_resource type="Script" uid="uid://dx6qm33lbkkat" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" uid="uid://663dqog1tv3d" path="res://scripts/board.gd" id="2_board"]
 
-[node name="Main" type="Node2D"]
+[node name="Main" type="Node2D" unique_id=558552991]
 script = ExtResource("1_main")
 
-[node name="Board" type="Node2D" parent="."]
+[node name="Board" type="Node2D" parent="." unique_id=1865987955]
 position = Vector2(0, 208)
 script = ExtResource("2_board")
 
-[node name="MoveTimer" type="Timer" parent="."]
+[node name="MoveTimer" type="Timer" parent="." unique_id=852463899]
 wait_time = 0.3
 
-[node name="CombatTimer" type="Timer" parent="."]
+[node name="CombatTimer" type="Timer" parent="." unique_id=1140228369]
 wait_time = 0.45
 
-[node name="BuildTimer" type="Timer" parent="."]
-wait_time = 1.0
+[node name="BuildTimer" type="Timer" parent="." unique_id=998230607]
 
-[node name="DarknessTimer" type="Timer" parent="."]
+[node name="DarknessTimer" type="Timer" parent="." unique_id=2012859958]
 wait_time = 2.0
 
-[node name="HUD" type="CanvasLayer" parent="."]
+[node name="HUD" type="CanvasLayer" parent="." unique_id=698819380]
 
-[node name="TopBar" type="ColorRect" parent="HUD"]
+[node name="TopBar" type="ColorRect" parent="HUD" unique_id=452560052]
 offset_right = 1024.0
 offset_bottom = 112.0
-color = Color(0.075, 0.045, 0.09, 1)
 mouse_filter = 2
+color = Color(0.075, 0.045, 0.09, 1)
 
-[node name="Title" type="Label" parent="HUD/TopBar"]
+[node name="Title" type="Label" parent="HUD/TopBar" unique_id=1631591509]
+layout_mode = 0
 offset_left = 24.0
 offset_top = 8.0
 offset_right = 660.0
 offset_bottom = 38.0
 theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
 theme_override_font_sizes/font_size = 26
-text = "MY EVIL LORD — GRAYBOX v0.4"
+text = "MY EVIL LORD — GRAYBOX v0.5"
 
-[node name="StatusLabel" type="Label" parent="HUD/TopBar"]
+[node name="StatusLabel" type="Label" parent="HUD/TopBar" unique_id=1979990292]
+layout_mode = 0
 offset_left = 24.0
 offset_top = 44.0
 offset_right = 390.0
@@ -47,7 +48,8 @@ offset_bottom = 70.0
 theme_override_colors/font_color = Color(0.87, 0.82, 0.9, 1)
 theme_override_font_sizes/font_size = 18
 
-[node name="ResourceLabel" type="Label" parent="HUD/TopBar"]
+[node name="ResourceLabel" type="Label" parent="HUD/TopBar" unique_id=843608721]
+layout_mode = 0
 offset_left = 350.0
 offset_top = 44.0
 offset_right = 695.0
@@ -55,7 +57,8 @@ offset_bottom = 70.0
 theme_override_colors/font_color = Color(0.69, 0.94, 0.82, 1)
 theme_override_font_sizes/font_size = 16
 
-[node name="TimerLabel" type="Label" parent="HUD/TopBar"]
+[node name="TimerLabel" type="Label" parent="HUD/TopBar" unique_id=255514499]
+layout_mode = 0
 offset_left = 700.0
 offset_top = 44.0
 offset_right = 840.0
@@ -63,7 +66,8 @@ offset_bottom = 70.0
 theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
 theme_override_font_sizes/font_size = 16
 
-[node name="HeroLabel" type="Label" parent="HUD/TopBar"]
+[node name="HeroLabel" type="Label" parent="HUD/TopBar" unique_id=605850540]
+layout_mode = 0
 offset_left = 845.0
 offset_top = 44.0
 offset_right = 995.0
@@ -71,7 +75,8 @@ offset_bottom = 70.0
 theme_override_colors/font_color = Color(0.95, 0.43, 0.37, 1)
 theme_override_font_sizes/font_size = 16
 
-[node name="HintLabel" type="Label" parent="HUD/TopBar"]
+[node name="HintLabel" type="Label" parent="HUD/TopBar" unique_id=1092016063]
+layout_mode = 0
 offset_left = 24.0
 offset_top = 82.0
 offset_right = 995.0
@@ -79,13 +84,14 @@ offset_bottom = 106.0
 theme_override_colors/font_color = Color(0.67, 0.62, 0.7, 1)
 theme_override_font_sizes/font_size = 15
 
-[node name="RightPanel" type="ColorRect" parent="HUD"]
+[node name="RightPanel" type="ColorRect" parent="HUD" unique_id=1768939282]
 offset_left = 1024.0
 offset_right = 1280.0
 offset_bottom = 720.0
 color = Color(0.065, 0.04, 0.078, 1)
 
-[node name="InstructionTitle" type="Label" parent="HUD/RightPanel"]
+[node name="InstructionTitle" type="Label" parent="HUD/RightPanel" unique_id=1980702827]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 24.0
 offset_right = 252.0
@@ -94,17 +100,26 @@ theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
 theme_override_font_sizes/font_size = 20
 text = "КАК ИГРАТЬ"
 
-[node name="InstructionLabel" type="Label" parent="HUD/RightPanel"]
+[node name="InstructionLabel" type="Label" parent="HUD/RightPanel" unique_id=2146884428]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 62.0
 offset_right = 252.0
 offset_bottom = 210.0
 theme_override_colors/font_color = Color(0.8, 0.76, 0.83, 1)
 theme_override_font_sizes/font_size = 12
-text = "1 + ЛКМ — копать (−1)\n2 + ЛКМ — защитник (−4)\n3 или клик по Владыке — перенос\nПКМ — убрать защитника (+2)\nEnter — вторжение • R — рестарт\nПробел — активная пауза\nСтрелки / края — прокрутка\nБиом меняется каждые 32 клетки."
+text = "1 + ЛКМ — копать (−1)
+2 + ЛКМ — защитник (−4)
+3 или клик по Владыке — перенос
+ПКМ — убрать защитника (+2)
+Enter — вторжение • R — рестарт
+Пробел — активная пауза
+Стрелки / края — прокрутка
+Биом меняется каждые 32 клетки."
 autowrap_mode = 3
 
-[node name="DigButton" type="Button" parent="HUD/RightPanel"]
+[node name="DigButton" type="Button" parent="HUD/RightPanel" unique_id=1130536513]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 220.0
 offset_right = 252.0
@@ -113,7 +128,8 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 17
 text = "1  КОПАТЬ"
 
-[node name="DefenderButton" type="Button" parent="HUD/RightPanel"]
+[node name="DefenderButton" type="Button" parent="HUD/RightPanel" unique_id=1185645880]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 264.0
 offset_right = 252.0
@@ -122,7 +138,8 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 17
 text = "2  ЗАЩИТНИК"
 
-[node name="MoveLordButton" type="Button" parent="HUD/RightPanel"]
+[node name="MoveLordButton" type="Button" parent="HUD/RightPanel" unique_id=1401804753]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 308.0
 offset_right = 252.0
@@ -131,7 +148,8 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 17
 text = "3  ПЕРЕНЕСТИ"
 
-[node name="StartButton" type="Button" parent="HUD/RightPanel"]
+[node name="StartButton" type="Button" parent="HUD/RightPanel" unique_id=1391302494]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 356.0
 offset_right = 252.0
@@ -141,7 +159,8 @@ theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
 theme_override_font_sizes/font_size = 17
 text = "НАЧАТЬ ВТОРЖЕНИЕ"
 
-[node name="PauseButton" type="Button" parent="HUD/RightPanel"]
+[node name="PauseButton" type="Button" parent="HUD/RightPanel" unique_id=1799785703]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 408.0
 offset_right = 252.0
@@ -150,7 +169,8 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 16
 text = "Ⅱ  ПАУЗА"
 
-[node name="RestartButton" type="Button" parent="HUD/RightPanel"]
+[node name="RestartButton" type="Button" parent="HUD/RightPanel" unique_id=22215304]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 460.0
 offset_right = 252.0
@@ -159,7 +179,8 @@ focus_mode = 0
 theme_override_font_sizes/font_size = 16
 text = "ПЕРЕЗАПУСТИТЬ"
 
-[node name="OutcomeLabel" type="Label" parent="HUD/RightPanel"]
+[node name="OutcomeLabel" type="Label" parent="HUD/RightPanel" unique_id=2051421086]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 510.0
 offset_right = 252.0
@@ -171,12 +192,13 @@ horizontal_alignment = 1
 vertical_alignment = 1
 autowrap_mode = 3
 
-[node name="VersionLabel" type="Label" parent="HUD/RightPanel"]
+[node name="VersionLabel" type="Label" parent="HUD/RightPanel" unique_id=1628757721]
+layout_mode = 0
 offset_left = 20.0
 offset_top = 684.0
 offset_right = 252.0
 offset_bottom = 708.0
 theme_override_colors/font_color = Color(0.39, 0.35, 0.42, 1)
 theme_override_font_sizes/font_size = 12
-text = "Godot 4.7.2 • graybox v0.4"
+text = "Godot 4.7.2 • graybox v0.5"
 horizontal_alignment = 1
