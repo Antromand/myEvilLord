@@ -4,11 +4,13 @@ const DEFENDER_COST := 4
 const DEFENDER_REFUND := 2
 const DEFENDER_MAX_HP := 3
 const DIG_COST := 1
-const DARKNESS_CAP := 16
+const DARKNESS_CAP := 999
+const DEBUG_START_DARKNESS := 999
 const DARKNESS_GENERATION_AMOUNT := 1
 const HERO_MAX_HP := 8
 const HERO_ATTACK := 1
 const DEFENDER_ATTACK := 2
+const TOTAL_WAVES := 3
 const PREPARATION_SECONDS := 75
 const INVALID_CELL := Vector2i(-1, -1)
 
@@ -40,7 +42,7 @@ enum Phase {
 @onready var outcome_label: Label = $HUD/RightPanel/OutcomeLabel
 
 var phase := Phase.PREPARATION
-var resource_points := 4
+var resource_points := DEBUG_START_DARKNESS
 var preparation_seconds := PREPARATION_SECONDS
 var hero_hp := HERO_MAX_HP
 var current_route: Array[Vector2i] = []
@@ -50,6 +52,10 @@ var selected_mode := GrayboxBoard.InteractionMode.DIG
 var invasion_seed := 0
 var event_message := "Подготовка началась."
 var game_paused := false
+var current_wave := 1
+var attackers_left_in_wave := 1
+var attacker_number_in_wave := 0
+var defeated_attackers := 0
 
 
 func _ready() -> void:
@@ -69,13 +75,17 @@ func _ready() -> void:
 
 	board.reset_board()
 	phase = Phase.PREPARATION
-	resource_points = 4
+	resource_points = DEBUG_START_DARKNESS
 	preparation_seconds = PREPARATION_SECONDS
 	hero_hp = HERO_MAX_HP
 	route_index = 0
 	combat_cell = INVALID_CELL
 	selected_mode = GrayboxBoard.InteractionMode.DIG
 	game_paused = false
+	current_wave = 1
+	attackers_left_in_wave = 1
+	attacker_number_in_wave = 0
+	defeated_attackers = 0
 	invasion_seed = _create_invasion_seed()
 	board.set_interaction(selected_mode, true)
 	board.set_invasion_active(false)
@@ -108,13 +118,17 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 
 func _on_board_cell_clicked(cell: Vector2i) -> void:
-	if not _can_edit_board():
+	if phase == Phase.PREPARATION and not game_paused and cell == board.lord_cell:
+		if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD:
+			_set_mode(GrayboxBoard.InteractionMode.DIG)
+			event_message = "Перенос Владыки выключен."
+		else:
+			_set_mode(GrayboxBoard.InteractionMode.MOVE_LORD)
+			event_message = "Владыка выбран. Повторный клик отменит перенос."
+		_refresh_ui()
 		return
 
-	if phase == Phase.PREPARATION and cell == board.lord_cell:
-		_set_mode(GrayboxBoard.InteractionMode.MOVE_LORD)
-		event_message = "Владыка выбран. Кликните по свободному тоннелю для переноса."
-		_refresh_ui()
+	if not _can_edit_board():
 		return
 
 	if selected_mode == GrayboxBoard.InteractionMode.DIG:
@@ -220,9 +234,7 @@ func _set_mode(mode: int) -> void:
 
 
 func _can_edit_board() -> bool:
-	return phase == Phase.PREPARATION or (
-		game_paused and (phase == Phase.APPROACH or phase == Phase.ASSAULT)
-	)
+	return phase == Phase.PREPARATION and not game_paused
 
 
 func _update_route_preview() -> void:
@@ -250,6 +262,10 @@ func _start_assault() -> void:
 	route_index = 0
 	combat_cell = INVALID_CELL
 	hero_hp = HERO_MAX_HP
+	current_wave = 1
+	attackers_left_in_wave = 1
+	attacker_number_in_wave = 0
+	defeated_attackers = 0
 	if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD:
 		selected_mode = GrayboxBoard.InteractionMode.DIG
 	board.set_interaction(selected_mode, false)
@@ -264,11 +280,24 @@ func _on_knight_entered_cave() -> void:
 	if phase != Phase.APPROACH:
 		return
 	phase = Phase.ASSAULT
+	_spawn_next_attacker()
+	_refresh_ui()
+
+
+func _spawn_next_attacker() -> void:
+	hero_hp = HERO_MAX_HP
+	route_index = 0
+	combat_cell = INVALID_CELL
+	attacker_number_in_wave += 1
 	board.set_hero(current_route[0], hero_hp, HERO_MAX_HP)
-	event_message = "Рыцарь вошёл в пещеру и начал спуск по маршруту #%d." % invasion_seed
+	event_message = "Волна %d/3: вторженец %d/%d начал спуск с %d HP." % [
+		current_wave,
+		attacker_number_in_wave,
+		current_wave,
+		HERO_MAX_HP,
+	]
 	if not game_paused:
 		move_timer.start()
-	_refresh_ui()
 
 
 func _toggle_pause() -> void:
@@ -281,10 +310,8 @@ func _toggle_pause() -> void:
 		combat_timer.stop()
 		build_timer.stop()
 		darkness_timer.stop()
-		if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD and phase != Phase.PREPARATION:
-			selected_mode = GrayboxBoard.InteractionMode.DIG
-		board.set_interaction(selected_mode, true)
-		event_message = "АКТИВНАЯ ПАУЗА: можно копать и ставить защитников."
+		board.set_interaction(selected_mode, false)
+		event_message = "ПАУЗА: доступен только осмотр карты."
 	else:
 		board.set_interaction(selected_mode, phase == Phase.PREPARATION)
 		if phase == Phase.PREPARATION:
@@ -341,7 +368,7 @@ func _resolve_combat_round() -> void:
 	board.set_hero(combat_cell, hero_hp, HERO_MAX_HP)
 
 	if hero_hp <= 0:
-		_win_game()
+		_complete_current_attacker()
 		return
 
 	if defender_hp <= 0:
@@ -354,6 +381,27 @@ func _resolve_combat_round() -> void:
 	_refresh_ui()
 
 
+func _complete_current_attacker() -> void:
+	move_timer.stop()
+	combat_timer.stop()
+	board.clear_hero()
+	combat_cell = INVALID_CELL
+	defeated_attackers += 1
+	attackers_left_in_wave -= 1
+	if attackers_left_in_wave > 0:
+		_spawn_next_attacker()
+		_refresh_ui()
+		return
+	if current_wave < TOTAL_WAVES:
+		current_wave += 1
+		attackers_left_in_wave = current_wave
+		attacker_number_in_wave = 0
+		_spawn_next_attacker()
+		_refresh_ui()
+		return
+	_win_game()
+
+
 func _win_game() -> void:
 	phase = Phase.WON
 	game_paused = false
@@ -364,7 +412,7 @@ func _win_game() -> void:
 	board.clear_hero()
 	board.set_surface_motion_paused(false)
 	board.set_interaction(selected_mode, false)
-	event_message = "Герой уничтожен. Подземелье выстояло."
+	event_message = "Все три волны и шесть вторженцев уничтожены. Подземелье выстояло."
 	_refresh_ui()
 
 
@@ -433,7 +481,16 @@ func _refresh_ui() -> void:
 		timer_label.text = "ПОДХОД"
 	else:
 		timer_label.text = "ВТОРЖЕНИЕ"
-	hero_label.text = "SEED: %d" % invasion_seed if phase == Phase.PREPARATION else "ГЕРОЙ: %d/%d" % [hero_hp, HERO_MAX_HP]
+	if phase == Phase.PREPARATION or phase == Phase.APPROACH:
+		hero_label.text = "ВОЛНА 1/3 • HP %d" % HERO_MAX_HP
+	else:
+		hero_label.text = "ВОЛНА %d/3 • ВРАГ %d/%d • HP %d/%d" % [
+			current_wave,
+			attacker_number_in_wave,
+			current_wave,
+			hero_hp,
+			HERO_MAX_HP,
+		]
 	hint_label.text = event_message
 
 	var can_edit := _can_edit_board()
@@ -449,16 +506,16 @@ func _refresh_ui() -> void:
 
 	match phase:
 		Phase.PREPARATION:
-			outcome_label.text = "Карта 64×128, окно 32×16. Клик по Владыке включает перенос. Пробел — активная пауза."
+			outcome_label.text = "Карта 64×128, окно 32×16. Клик по Владыке включает и выключает перенос. На паузе доступен только осмотр."
 			outcome_label.add_theme_color_override("font_color", Color(0.8, 0.76, 0.83, 1))
 		Phase.APPROACH:
-			outcome_label.text = "Рыцарь идёт к пещере с той позиции, где находился в момент начала вторжения."
+			outcome_label.text = "Начинается серия из трёх волн: 1, 2 и 3 вторженца с 8 HP каждый."
 			outcome_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.31, 1))
 		Phase.ASSAULT:
-			outcome_label.text = "ВТОРЖЕНИЕ\n\nПробел замораживает бой и разрешает копать и ставить защитников. Перенос Владыки заблокирован."
+			outcome_label.text = "ВТОРЖЕНИЕ\n\nПробел замораживает бой. На паузе можно только осматривать карту."
 			outcome_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.31, 1))
 		Phase.WON:
-			outcome_label.text = "ПОБЕДА\n\nГерой уничтожен. Нажмите R, чтобы проверить другой маршрут."
+			outcome_label.text = "ПОБЕДА\n\nВсе шесть вторженцев уничтожены. Нажмите R, чтобы начать заново."
 			outcome_label.add_theme_color_override("font_color", Color(0.34, 0.92, 0.62, 1))
 		Phase.LOST:
 			outcome_label.text = "ПОРАЖЕНИЕ\n\nВладыка повержен. Нажмите R и перестройте оборону."

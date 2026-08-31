@@ -494,13 +494,13 @@ func center_camera_on(cell: Vector2i) -> void:
 
 func _update_camera_scroll(delta: float) -> void:
 	var direction := Vector2i.ZERO
-	if Input.is_key_pressed(KEY_LEFT):
+	if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A):
 		direction.x -= 1
-	if Input.is_key_pressed(KEY_RIGHT):
+	if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D):
 		direction.x += 1
-	if Input.is_key_pressed(KEY_UP):
+	if Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W):
 		direction.y -= 1
-	if Input.is_key_pressed(KEY_DOWN):
+	if Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S):
 		direction.y += 1
 
 	var viewport_size := get_viewport_rect().size
