@@ -14,6 +14,7 @@ const INVALID_CELL := Vector2i(-1, -1)
 
 enum Phase {
 	PREPARATION,
+	APPROACH,
 	ASSAULT,
 	WON,
 	LOST,
@@ -32,6 +33,8 @@ enum Phase {
 @onready var hint_label: Label = $HUD/TopBar/HintLabel
 @onready var dig_button: Button = $HUD/RightPanel/DigButton
 @onready var defender_button: Button = $HUD/RightPanel/DefenderButton
+@onready var move_lord_button: Button = $HUD/RightPanel/MoveLordButton
+@onready var pause_button: Button = $HUD/RightPanel/PauseButton
 @onready var start_button: Button = $HUD/RightPanel/StartButton
 @onready var restart_button: Button = $HUD/RightPanel/RestartButton
 @onready var outcome_label: Label = $HUD/RightPanel/OutcomeLabel
@@ -46,17 +49,21 @@ var combat_cell := INVALID_CELL
 var selected_mode := GrayboxBoard.InteractionMode.DIG
 var invasion_seed := 0
 var event_message := "Подготовка началась."
+var game_paused := false
 
 
 func _ready() -> void:
 	board.cell_clicked.connect(_on_board_cell_clicked)
 	board.cell_right_clicked.connect(_on_board_cell_right_clicked)
+	board.knight_entered_cave.connect(_on_knight_entered_cave)
 	move_timer.timeout.connect(_on_move_timer_timeout)
 	combat_timer.timeout.connect(_on_combat_timer_timeout)
 	build_timer.timeout.connect(_on_build_timer_timeout)
 	darkness_timer.timeout.connect(_on_darkness_timer_timeout)
 	dig_button.pressed.connect(_on_dig_button_pressed)
 	defender_button.pressed.connect(_on_defender_button_pressed)
+	move_lord_button.pressed.connect(_on_move_lord_button_pressed)
+	pause_button.pressed.connect(_on_pause_button_pressed)
 	start_button.pressed.connect(_on_start_button_pressed)
 	restart_button.pressed.connect(_on_restart_button_pressed)
 
@@ -68,8 +75,10 @@ func _ready() -> void:
 	route_index = 0
 	combat_cell = INVALID_CELL
 	selected_mode = GrayboxBoard.InteractionMode.DIG
+	game_paused = false
 	invasion_seed = _create_invasion_seed()
 	board.set_interaction(selected_mode, true)
+	board.set_invasion_active(false)
 	board.clear_hero()
 	_update_route_preview()
 	build_timer.start()
@@ -88,14 +97,24 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_set_mode(GrayboxBoard.InteractionMode.DIG)
 		KEY_2:
 			_set_mode(GrayboxBoard.InteractionMode.DEFENDER)
+		KEY_3:
+			_set_mode(GrayboxBoard.InteractionMode.MOVE_LORD)
 		KEY_ENTER, KEY_KP_ENTER:
 			_start_assault()
+		KEY_SPACE:
+			_toggle_pause()
 		KEY_R:
 			_restart_game()
 
 
 func _on_board_cell_clicked(cell: Vector2i) -> void:
-	if phase != Phase.PREPARATION:
+	if not _can_edit_board():
+		return
+
+	if phase == Phase.PREPARATION and cell == board.lord_cell:
+		_set_mode(GrayboxBoard.InteractionMode.MOVE_LORD)
+		event_message = "Владыка выбран. Кликните по свободному тоннелю для переноса."
+		_refresh_ui()
 		return
 
 	if selected_mode == GrayboxBoard.InteractionMode.DIG:
@@ -114,7 +133,19 @@ func _on_board_cell_clicked(cell: Vector2i) -> void:
 			event_message = "Руда: копание −%d, получено +%d мрака." % [DIG_COST, gained]
 		else:
 			event_message = "Новый тоннель проложен за %d мрак." % DIG_COST
-		_update_route_preview()
+		if phase == Phase.PREPARATION:
+			_update_route_preview()
+		_refresh_ui()
+		return
+
+	if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD:
+		if phase != Phase.PREPARATION:
+			return
+		if board.move_lord(cell):
+			event_message = "Владыка перенесён в свободный тоннель."
+			_update_route_preview()
+		else:
+			event_message = "Владыку можно перенести только в свободную прокопанную клетку."
 		_refresh_ui()
 		return
 
@@ -131,7 +162,7 @@ func _on_board_cell_clicked(cell: Vector2i) -> void:
 
 
 func _on_board_cell_right_clicked(cell: Vector2i) -> void:
-	if phase != Phase.PREPARATION:
+	if not _can_edit_board():
 		return
 	if board.remove_defender(cell):
 		var refunded := _add_darkness(DEFENDER_REFUND)
@@ -149,6 +180,14 @@ func _on_defender_button_pressed() -> void:
 	_set_mode(GrayboxBoard.InteractionMode.DEFENDER)
 
 
+func _on_move_lord_button_pressed() -> void:
+	_set_mode(GrayboxBoard.InteractionMode.MOVE_LORD)
+
+
+func _on_pause_button_pressed() -> void:
+	_toggle_pause()
+
+
 func _on_start_button_pressed() -> void:
 	_start_assault()
 
@@ -158,7 +197,11 @@ func _on_restart_button_pressed() -> void:
 
 
 func _set_mode(mode: int) -> void:
-	if phase != Phase.PREPARATION:
+	if not _can_edit_board():
+		return
+	if mode == GrayboxBoard.InteractionMode.MOVE_LORD and phase != Phase.PREPARATION:
+		event_message = "После начала вторжения Владыку переносить нельзя."
+		_refresh_ui()
 		return
 	if mode == GrayboxBoard.InteractionMode.DEFENDER and resource_points < DEFENDER_COST:
 		event_message = "Сначала добудьте руду: защитник стоит %d мрака." % DEFENDER_COST
@@ -166,8 +209,20 @@ func _set_mode(mode: int) -> void:
 		return
 	selected_mode = mode
 	board.set_interaction(selected_mode, true)
-	event_message = "Режим: копать." if mode == GrayboxBoard.InteractionMode.DIG else "Режим: выращивать защитников."
+	match mode:
+		GrayboxBoard.InteractionMode.DIG:
+			event_message = "Режим: копать."
+		GrayboxBoard.InteractionMode.DEFENDER:
+			event_message = "Режим: выращивать защитников."
+		GrayboxBoard.InteractionMode.MOVE_LORD:
+			event_message = "Режим: перенести Владыку в свободный тоннель."
 	_refresh_ui()
+
+
+func _can_edit_board() -> bool:
+	return phase == Phase.PREPARATION or (
+		game_paused and (phase == Phase.APPROACH or phase == Phase.ASSAULT)
+	)
 
 
 func _update_route_preview() -> void:
@@ -188,16 +243,59 @@ func _start_assault() -> void:
 		_refresh_ui()
 		return
 
-	phase = Phase.ASSAULT
+	phase = Phase.APPROACH
+	game_paused = false
 	build_timer.stop()
 	darkness_timer.stop()
 	route_index = 0
 	combat_cell = INVALID_CELL
 	hero_hp = HERO_MAX_HP
+	if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD:
+		selected_mode = GrayboxBoard.InteractionMode.DIG
 	board.set_interaction(selected_mode, false)
+	board.set_surface_motion_paused(false)
+	board.set_invasion_active(true)
+	board.clear_hero()
+	event_message = "Вторжение началось: рыцарь идёт от текущей позиции к пещере."
+	_refresh_ui()
+
+
+func _on_knight_entered_cave() -> void:
+	if phase != Phase.APPROACH:
+		return
+	phase = Phase.ASSAULT
 	board.set_hero(current_route[0], hero_hp, HERO_MAX_HP)
-	event_message = "Герой спускается по блуждающему маршруту #%d." % invasion_seed
-	move_timer.start()
+	event_message = "Рыцарь вошёл в пещеру и начал спуск по маршруту #%d." % invasion_seed
+	if not game_paused:
+		move_timer.start()
+	_refresh_ui()
+
+
+func _toggle_pause() -> void:
+	if phase != Phase.PREPARATION and phase != Phase.APPROACH and phase != Phase.ASSAULT:
+		return
+	game_paused = not game_paused
+	board.set_surface_motion_paused(game_paused)
+	if game_paused:
+		move_timer.stop()
+		combat_timer.stop()
+		build_timer.stop()
+		darkness_timer.stop()
+		if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD and phase != Phase.PREPARATION:
+			selected_mode = GrayboxBoard.InteractionMode.DIG
+		board.set_interaction(selected_mode, true)
+		event_message = "АКТИВНАЯ ПАУЗА: можно копать и ставить защитников."
+	else:
+		board.set_interaction(selected_mode, phase == Phase.PREPARATION)
+		if phase == Phase.PREPARATION:
+			build_timer.start()
+			darkness_timer.start()
+		elif phase == Phase.ASSAULT:
+			if combat_cell == INVALID_CELL:
+				move_timer.start()
+			else:
+				combat_timer.start()
+		event_message = "Пауза снята."
 	_refresh_ui()
 
 
@@ -206,7 +304,7 @@ func _on_move_timer_timeout() -> void:
 
 
 func _advance_hero() -> void:
-	if phase != Phase.ASSAULT or combat_cell != INVALID_CELL:
+	if game_paused or phase != Phase.ASSAULT or combat_cell != INVALID_CELL:
 		return
 	if route_index >= current_route.size() - 1:
 		_lose_game()
@@ -235,7 +333,7 @@ func _on_combat_timer_timeout() -> void:
 
 
 func _resolve_combat_round() -> void:
-	if phase != Phase.ASSAULT or combat_cell == INVALID_CELL:
+	if game_paused or phase != Phase.ASSAULT or combat_cell == INVALID_CELL:
 		return
 
 	hero_hp = max(0, hero_hp - DEFENDER_ATTACK)
@@ -258,11 +356,13 @@ func _resolve_combat_round() -> void:
 
 func _win_game() -> void:
 	phase = Phase.WON
+	game_paused = false
 	move_timer.stop()
 	combat_timer.stop()
 	build_timer.stop()
 	darkness_timer.stop()
 	board.clear_hero()
+	board.set_surface_motion_paused(false)
 	board.set_interaction(selected_mode, false)
 	event_message = "Герой уничтожен. Подземелье выстояло."
 	_refresh_ui()
@@ -270,19 +370,21 @@ func _win_game() -> void:
 
 func _lose_game() -> void:
 	phase = Phase.LOST
+	game_paused = false
 	move_timer.stop()
 	combat_timer.stop()
 	build_timer.stop()
 	darkness_timer.stop()
 	combat_cell = INVALID_CELL
 	board.set_hero(board.lord_cell, hero_hp, HERO_MAX_HP)
+	board.set_surface_motion_paused(false)
 	board.set_interaction(selected_mode, false)
 	event_message = "Герой добрался до Владыки."
 	_refresh_ui()
 
 
 func _on_build_timer_timeout() -> void:
-	if phase != Phase.PREPARATION:
+	if game_paused or phase != Phase.PREPARATION:
 		return
 	preparation_seconds = maxi(0, preparation_seconds - 1)
 	if preparation_seconds == 0:
@@ -293,7 +395,7 @@ func _on_build_timer_timeout() -> void:
 
 
 func _on_darkness_timer_timeout() -> void:
-	if phase != Phase.PREPARATION:
+	if game_paused or phase != Phase.PREPARATION:
 		return
 	_add_darkness(DARKNESS_GENERATION_AMOUNT)
 	_refresh_ui()
@@ -323,22 +425,37 @@ func _refresh_ui() -> void:
 		DIG_COST,
 		DEFENDER_COST,
 	]
-	timer_label.text = "ДО ВОЛНЫ: %02dс" % preparation_seconds if phase == Phase.PREPARATION else "ВТОРЖЕНИЕ"
+	if game_paused:
+		timer_label.text = "ПАУЗА"
+	elif phase == Phase.PREPARATION:
+		timer_label.text = "ДО ВОЛНЫ: %02dс" % preparation_seconds
+	elif phase == Phase.APPROACH:
+		timer_label.text = "ПОДХОД"
+	else:
+		timer_label.text = "ВТОРЖЕНИЕ"
 	hero_label.text = "SEED: %d" % invasion_seed if phase == Phase.PREPARATION else "ГЕРОЙ: %d/%d" % [hero_hp, HERO_MAX_HP]
 	hint_label.text = event_message
 
-	dig_button.disabled = phase != Phase.PREPARATION
-	defender_button.disabled = phase != Phase.PREPARATION
+	var can_edit := _can_edit_board()
+	dig_button.disabled = not can_edit
+	defender_button.disabled = not can_edit
+	move_lord_button.disabled = phase != Phase.PREPARATION
 	start_button.disabled = phase != Phase.PREPARATION or current_route.is_empty()
+	pause_button.disabled = phase == Phase.WON or phase == Phase.LOST
+	pause_button.text = "▶  ПРОДОЛЖИТЬ" if game_paused else "Ⅱ  ПАУЗА"
 	dig_button.text = "●  1  КОПАТЬ" if selected_mode == GrayboxBoard.InteractionMode.DIG else "1  КОПАТЬ"
 	defender_button.text = "●  2  ЗАЩИТНИК" if selected_mode == GrayboxBoard.InteractionMode.DEFENDER else "2  ЗАЩИТНИК"
+	move_lord_button.text = "●  3  ПЕРЕНЕСТИ" if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD else "3  ПЕРЕНЕСТИ"
 
 	match phase:
 		Phase.PREPARATION:
-			outcome_label.text = "Маршрут #%d. Герой предпочитает спуск и новые тоннели. Сердце даёт +1 мрак каждые 2 секунды до лимита %d." % [invasion_seed, DARKNESS_CAP]
+			outcome_label.text = "Карта 64×128, окно 32×16. Клик по Владыке включает перенос. Пробел — активная пауза."
 			outcome_label.add_theme_color_override("font_color", Color(0.8, 0.76, 0.83, 1))
+		Phase.APPROACH:
+			outcome_label.text = "Рыцарь идёт к пещере с той позиции, где находился в момент начала вторжения."
+			outcome_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.31, 1))
 		Phase.ASSAULT:
-			outcome_label.text = "ВТОРЖЕНИЕ\n\nСтроительство заблокировано. Герой идёт по жёлтому блуждающему маршруту #%d." % invasion_seed
+			outcome_label.text = "ВТОРЖЕНИЕ\n\nПробел замораживает бой и разрешает копать и ставить защитников. Перенос Владыки заблокирован."
 			outcome_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.31, 1))
 		Phase.WON:
 			outcome_label.text = "ПОБЕДА\n\nГерой уничтожен. Нажмите R, чтобы проверить другой маршрут."
@@ -352,6 +469,8 @@ func _phase_title() -> String:
 	match phase:
 		Phase.PREPARATION:
 			return "ПОДГОТОВКА"
+		Phase.APPROACH:
+			return "РЫЦАРЬ ИДЁТ К ПЕЩЕРЕ"
 		Phase.ASSAULT:
 			return "ВТОРЖЕНИЕ"
 		Phase.WON:
@@ -384,6 +503,8 @@ func debug_run_to_completion(max_steps: int = 512) -> int:
 	move_timer.stop()
 	combat_timer.stop()
 	build_timer.stop()
+	if phase == Phase.APPROACH:
+		_on_knight_entered_cave()
 	var steps := 0
 	while phase == Phase.ASSAULT and steps < max_steps:
 		if combat_cell == INVALID_CELL:
