@@ -32,6 +32,7 @@ enum Phase {
 @onready var hint_label: Label = $HUD/TopBar/HintLabel
 @onready var dig_button: Button = $HUD/RightPanel/DigButton
 @onready var defender_button: Button = $HUD/RightPanel/DefenderButton
+@onready var move_lord_button: Button = $HUD/RightPanel/MoveLordButton
 @onready var start_button: Button = $HUD/RightPanel/StartButton
 @onready var restart_button: Button = $HUD/RightPanel/RestartButton
 @onready var outcome_label: Label = $HUD/RightPanel/OutcomeLabel
@@ -57,6 +58,7 @@ func _ready() -> void:
 	darkness_timer.timeout.connect(_on_darkness_timer_timeout)
 	dig_button.pressed.connect(_on_dig_button_pressed)
 	defender_button.pressed.connect(_on_defender_button_pressed)
+	move_lord_button.pressed.connect(_on_move_lord_button_pressed)
 	start_button.pressed.connect(_on_start_button_pressed)
 	restart_button.pressed.connect(_on_restart_button_pressed)
 
@@ -70,6 +72,7 @@ func _ready() -> void:
 	selected_mode = GrayboxBoard.InteractionMode.DIG
 	invasion_seed = _create_invasion_seed()
 	board.set_interaction(selected_mode, true)
+	board.set_invasion_active(false)
 	board.clear_hero()
 	_update_route_preview()
 	build_timer.start()
@@ -88,6 +91,8 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			_set_mode(GrayboxBoard.InteractionMode.DIG)
 		KEY_2:
 			_set_mode(GrayboxBoard.InteractionMode.DEFENDER)
+		KEY_3:
+			_set_mode(GrayboxBoard.InteractionMode.MOVE_LORD)
 		KEY_ENTER, KEY_KP_ENTER:
 			_start_assault()
 		KEY_R:
@@ -115,6 +120,15 @@ func _on_board_cell_clicked(cell: Vector2i) -> void:
 		else:
 			event_message = "Новый тоннель проложен за %d мрак." % DIG_COST
 		_update_route_preview()
+		_refresh_ui()
+		return
+
+	if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD:
+		if board.move_lord(cell):
+			event_message = "Владыка перенесён в свободный тоннель."
+			_update_route_preview()
+		else:
+			event_message = "Владыку можно перенести только в свободную прокопанную клетку."
 		_refresh_ui()
 		return
 
@@ -149,6 +163,10 @@ func _on_defender_button_pressed() -> void:
 	_set_mode(GrayboxBoard.InteractionMode.DEFENDER)
 
 
+func _on_move_lord_button_pressed() -> void:
+	_set_mode(GrayboxBoard.InteractionMode.MOVE_LORD)
+
+
 func _on_start_button_pressed() -> void:
 	_start_assault()
 
@@ -166,7 +184,13 @@ func _set_mode(mode: int) -> void:
 		return
 	selected_mode = mode
 	board.set_interaction(selected_mode, true)
-	event_message = "Режим: копать." if mode == GrayboxBoard.InteractionMode.DIG else "Режим: выращивать защитников."
+	match mode:
+		GrayboxBoard.InteractionMode.DIG:
+			event_message = "Режим: копать."
+		GrayboxBoard.InteractionMode.DEFENDER:
+			event_message = "Режим: выращивать защитников."
+		GrayboxBoard.InteractionMode.MOVE_LORD:
+			event_message = "Режим: перенести Владыку в свободный тоннель."
 	_refresh_ui()
 
 
@@ -195,6 +219,7 @@ func _start_assault() -> void:
 	combat_cell = INVALID_CELL
 	hero_hp = HERO_MAX_HP
 	board.set_interaction(selected_mode, false)
+	board.set_invasion_active(true)
 	board.set_hero(current_route[0], hero_hp, HERO_MAX_HP)
 	event_message = "Герой спускается по блуждающему маршруту #%d." % invasion_seed
 	move_timer.start()
@@ -329,16 +354,18 @@ func _refresh_ui() -> void:
 
 	dig_button.disabled = phase != Phase.PREPARATION
 	defender_button.disabled = phase != Phase.PREPARATION
+	move_lord_button.disabled = phase != Phase.PREPARATION
 	start_button.disabled = phase != Phase.PREPARATION or current_route.is_empty()
 	dig_button.text = "●  1  КОПАТЬ" if selected_mode == GrayboxBoard.InteractionMode.DIG else "1  КОПАТЬ"
 	defender_button.text = "●  2  ЗАЩИТНИК" if selected_mode == GrayboxBoard.InteractionMode.DEFENDER else "2  ЗАЩИТНИК"
+	move_lord_button.text = "●  3  ПЕРЕНЕСТИ" if selected_mode == GrayboxBoard.InteractionMode.MOVE_LORD else "3  ПЕРЕНЕСТИ"
 
 	match phase:
 		Phase.PREPARATION:
-			outcome_label.text = "Маршрут #%d. Герой предпочитает спуск и новые тоннели. Сердце даёт +1 мрак каждые 2 секунды до лимита %d." % [invasion_seed, DARKNESS_CAP]
+			outcome_label.text = "Карта 128×256, окно 64×32. Стрелки или края экрана прокручивают уровень. Владыку можно переносить только до вторжения."
 			outcome_label.add_theme_color_override("font_color", Color(0.8, 0.76, 0.83, 1))
 		Phase.ASSAULT:
-			outcome_label.text = "ВТОРЖЕНИЕ\n\nСтроительство заблокировано. Герой идёт по жёлтому блуждающему маршруту #%d." % invasion_seed
+			outcome_label.text = "ВТОРЖЕНИЕ\n\nСтроительство и перенос Владыки заблокированы. В узком тоннеле герой идёт строго прямо."
 			outcome_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.31, 1))
 		Phase.WON:
 			outcome_label.text = "ПОБЕДА\n\nГерой уничтожен. Нажмите R, чтобы проверить другой маршрут."
