@@ -1,5 +1,7 @@
 extends SceneTree
 
+const TEST_SEED := 424242
+
 var failures := 0
 
 
@@ -14,49 +16,96 @@ func _run() -> void:
 		_finish()
 		return
 
-	_test_board_and_loss(packed_scene)
+	_test_route_and_economy(packed_scene)
+	_test_loss_without_defenders(packed_scene)
 	_test_two_defender_win(packed_scene)
 	_finish()
 
 
-func _test_board_and_loss(packed_scene: PackedScene) -> void:
-	var game := packed_scene.instantiate()
-	root.add_child(game)
+func _test_route_and_economy(packed_scene: PackedScene) -> void:
+	var game := _create_game(packed_scene)
 	var board: GrayboxBoard = game.get_node("Board")
-	game.get_node("BuildTimer").stop()
 
-	var route := board.find_path(board.entrance_cell, board.lord_cell)
-	_check(route.size() > 10, "На стартовой карте существует маршрут к Владыке.")
+	_check(board.entrance_cell.y == 0, "Вторжение начинается на верхней границе.")
+	_check(board.lord_cell.y == GrayboxBoard.HEIGHT - 1, "Владыка находится в нижней части карты.")
 
-	var ore_cell := Vector2i(2, 1)
+	var route_a := board.build_wandering_route(board.entrance_cell, board.lord_cell, TEST_SEED)
+	var route_b := board.build_wandering_route(board.entrance_cell, board.lord_cell, TEST_SEED)
+	var route_other := board.build_wandering_route(board.entrance_cell, board.lord_cell, TEST_SEED + 1)
+	var shortest_route := board.find_path(board.entrance_cell, board.lord_cell)
+	_check(route_a == route_b, "Одинаковый seed воспроизводит тот же маршрут.")
+	_check(route_a != route_other, "Другой seed меняет блуждающий маршрут.")
+	_check(not route_a.is_empty() and route_a[route_a.size() - 1] == board.lord_cell, "Блуждание завершается у Владыки.")
+	_check(route_a.size() > shortest_route.size(), "Блуждающий маршрут не сводится к кратчайшему BFS.")
+	_check(
+		route_a.size() <= GrayboxBoard.WANDER_STEP_BUDGET + GrayboxBoard.WIDTH * GrayboxBoard.HEIGHT,
+		"Защита от циклов ограничивает длину маршрута."
+	)
+
+	var plain_dirt := Vector2i(4, 0)
+	game.call("debug_set_darkness", 0)
+	game.call("_on_board_cell_clicked", plain_dirt)
+	_check(board.get_cell_type(plain_dirt) == GrayboxBoard.CellType.DIRT, "При нулевом мраке копание заблокировано.")
+	_check(int(game.call("debug_get_darkness")) == 0, "Заблокированное копание не уводит ресурс в минус.")
+
+	game.call("debug_set_darkness", 2)
+	game.call("_on_board_cell_clicked", plain_dirt)
+	_check(board.get_cell_type(plain_dirt) == GrayboxBoard.CellType.FLOOR, "Оплаченное копание создаёт тоннель.")
+	_check(int(game.call("debug_get_darkness")) == 1, "Обычное копание списывает 1 мрак.")
+
+	var ore_cell := Vector2i(4, 1)
 	_check(board.can_dig(ore_cell), "Первая клетка руды доступна для раскопки.")
-	var reward := board.dig_cell(ore_cell)
-	_check(reward == GrayboxBoard.ORE_REWARD, "Руда начисляет ожидаемый ресурс.")
+	game.call("debug_set_darkness", 4)
+	game.call("_on_board_cell_clicked", ore_cell)
+	_check(int(game.call("debug_get_darkness")) == 7, "Руда даёт чистый прирост 3 после стоимости копания.")
 
+	game.call("debug_set_darkness", 15)
+	game.call("debug_generate_darkness_tick")
+	game.call("debug_generate_darkness_tick")
+	_check(int(game.call("debug_get_darkness")) == 16, "Пассивная генерация останавливается на лимите 16.")
+
+	_destroy_game(game)
+
+
+func _test_loss_without_defenders(packed_scene: PackedScene) -> void:
+	var game := _create_game(packed_scene)
 	game.call("_start_assault")
 	game.call("debug_run_to_completion")
 	_check(game.call("_phase_title") == "ПОРАЖЕНИЕ", "Без защитников герой достигает Владыки.")
-
-	root.remove_child(game)
-	game.free()
+	_destroy_game(game)
 
 
 func _test_two_defender_win(packed_scene: PackedScene) -> void:
-	var game := packed_scene.instantiate()
-	root.add_child(game)
+	var game := _create_game(packed_scene)
 	var board: GrayboxBoard = game.get_node("Board")
-	game.get_node("BuildTimer").stop()
-
-	var route := board.find_path(board.entrance_cell, board.lord_cell)
-	_check(route.size() > 7, "Для боевого теста хватает клеток маршрута.")
-	if route.size() > 7:
-		_check(board.place_defender(route[3], 3), "Первый защитник поставлен на маршрут.")
-		_check(board.place_defender(route[7], 3), "Второй защитник поставлен на маршрут.")
+	var route := board.build_wandering_route(board.entrance_cell, board.lord_cell, TEST_SEED)
+	var placed := 0
+	var occupied: Dictionary = {}
+	for cell in route:
+		if placed >= 2:
+			break
+		if board.can_place_defender(cell) and not occupied.has(cell):
+			occupied[cell] = true
+			if board.place_defender(cell, 3):
+				placed += 1
+	_check(placed == 2, "Два защитника поставлены на блуждающий маршрут.")
 
 	game.call("_start_assault")
 	game.call("debug_run_to_completion")
 	_check(game.call("_phase_title") == "ПОБЕДА", "Два защитника останавливают героя.")
+	_destroy_game(game)
 
+
+func _create_game(packed_scene: PackedScene) -> Node:
+	var game := packed_scene.instantiate()
+	root.add_child(game)
+	game.get_node("BuildTimer").stop()
+	game.get_node("DarknessTimer").stop()
+	game.call("debug_set_invasion_seed", TEST_SEED)
+	return game
+
+
+func _destroy_game(game: Node) -> void:
 	root.remove_child(game)
 	game.free()
 

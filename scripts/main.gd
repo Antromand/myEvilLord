@@ -3,6 +3,9 @@ extends Node2D
 const DEFENDER_COST := 4
 const DEFENDER_REFUND := 2
 const DEFENDER_MAX_HP := 3
+const DIG_COST := 1
+const DARKNESS_CAP := 16
+const DARKNESS_GENERATION_AMOUNT := 1
 const HERO_MAX_HP := 8
 const HERO_ATTACK := 1
 const DEFENDER_ATTACK := 2
@@ -20,6 +23,7 @@ enum Phase {
 @onready var move_timer: Timer = $MoveTimer
 @onready var combat_timer: Timer = $CombatTimer
 @onready var build_timer: Timer = $BuildTimer
+@onready var darkness_timer: Timer = $DarknessTimer
 
 @onready var status_label: Label = $HUD/TopBar/StatusLabel
 @onready var resource_label: Label = $HUD/TopBar/ResourceLabel
@@ -40,6 +44,7 @@ var current_route: Array[Vector2i] = []
 var route_index := 0
 var combat_cell := INVALID_CELL
 var selected_mode := GrayboxBoard.InteractionMode.DIG
+var invasion_seed := 0
 var event_message := "Подготовка началась."
 
 
@@ -49,6 +54,7 @@ func _ready() -> void:
 	move_timer.timeout.connect(_on_move_timer_timeout)
 	combat_timer.timeout.connect(_on_combat_timer_timeout)
 	build_timer.timeout.connect(_on_build_timer_timeout)
+	darkness_timer.timeout.connect(_on_darkness_timer_timeout)
 	dig_button.pressed.connect(_on_dig_button_pressed)
 	defender_button.pressed.connect(_on_defender_button_pressed)
 	start_button.pressed.connect(_on_start_button_pressed)
@@ -62,10 +68,12 @@ func _ready() -> void:
 	route_index = 0
 	combat_cell = INVALID_CELL
 	selected_mode = GrayboxBoard.InteractionMode.DIG
+	invasion_seed = _create_invasion_seed()
 	board.set_interaction(selected_mode, true)
 	board.clear_hero()
 	_update_route_preview()
 	build_timer.start()
+	darkness_timer.start()
 	_refresh_ui()
 
 
@@ -91,16 +99,21 @@ func _on_board_cell_clicked(cell: Vector2i) -> void:
 		return
 
 	if selected_mode == GrayboxBoard.InteractionMode.DIG:
+		if resource_points < DIG_COST:
+			event_message = "Недостаточно мрака. Сердце создаст 1 мрак максимум через 2 секунды."
+			_refresh_ui()
+			return
 		if not board.can_dig(cell):
 			event_message = "Копать можно только рядом с существующим тоннелем."
 			_refresh_ui()
 			return
+		resource_points -= DIG_COST
 		var reward := board.dig_cell(cell)
-		resource_points += reward
+		var gained := _add_darkness(reward)
 		if reward > 0:
-			event_message = "Найдена руда: +%d мрака." % reward
+			event_message = "Руда: копание −%d, получено +%d мрака." % [DIG_COST, gained]
 		else:
-			event_message = "Новый тоннель проложен."
+			event_message = "Новый тоннель проложен за %d мрак." % DIG_COST
 		_update_route_preview()
 		_refresh_ui()
 		return
@@ -121,8 +134,8 @@ func _on_board_cell_right_clicked(cell: Vector2i) -> void:
 	if phase != Phase.PREPARATION:
 		return
 	if board.remove_defender(cell):
-		resource_points += DEFENDER_REFUND
-		event_message = "Защитник убран: возвращено %d мрака." % DEFENDER_REFUND
+		var refunded := _add_darkness(DEFENDER_REFUND)
+		event_message = "Защитник убран: возвращено %d мрака." % refunded
 	else:
 		event_message = "В этой клетке нет защитника."
 	_refresh_ui()
@@ -158,7 +171,11 @@ func _set_mode(mode: int) -> void:
 
 
 func _update_route_preview() -> void:
-	current_route = board.find_path(board.entrance_cell, board.lord_cell)
+	current_route = board.build_wandering_route(
+		board.entrance_cell,
+		board.lord_cell,
+		invasion_seed
+	)
 	board.set_preview_path(current_route)
 
 
@@ -173,12 +190,13 @@ func _start_assault() -> void:
 
 	phase = Phase.ASSAULT
 	build_timer.stop()
+	darkness_timer.stop()
 	route_index = 0
 	combat_cell = INVALID_CELL
 	hero_hp = HERO_MAX_HP
 	board.set_interaction(selected_mode, false)
 	board.set_hero(current_route[0], hero_hp, HERO_MAX_HP)
-	event_message = "Герой вошёл в подземелье и выбрал кратчайший маршрут."
+	event_message = "Герой спускается по блуждающему маршруту #%d." % invasion_seed
 	move_timer.start()
 	_refresh_ui()
 
@@ -243,6 +261,7 @@ func _win_game() -> void:
 	move_timer.stop()
 	combat_timer.stop()
 	build_timer.stop()
+	darkness_timer.stop()
 	board.clear_hero()
 	board.set_interaction(selected_mode, false)
 	event_message = "Герой уничтожен. Подземелье выстояло."
@@ -254,6 +273,7 @@ func _lose_game() -> void:
 	move_timer.stop()
 	combat_timer.stop()
 	build_timer.stop()
+	darkness_timer.stop()
 	combat_cell = INVALID_CELL
 	board.set_hero(board.lord_cell, hero_hp, HERO_MAX_HP)
 	board.set_interaction(selected_mode, false)
@@ -264,12 +284,31 @@ func _lose_game() -> void:
 func _on_build_timer_timeout() -> void:
 	if phase != Phase.PREPARATION:
 		return
-	preparation_seconds = max(0, preparation_seconds - 1)
+	preparation_seconds = maxi(0, preparation_seconds - 1)
 	if preparation_seconds == 0:
 		event_message = "Время подготовки закончилось."
 		_start_assault()
 	else:
 		_refresh_ui()
+
+
+func _on_darkness_timer_timeout() -> void:
+	if phase != Phase.PREPARATION:
+		return
+	_add_darkness(DARKNESS_GENERATION_AMOUNT)
+	_refresh_ui()
+
+
+func _add_darkness(amount: int) -> int:
+	var before := resource_points
+	resource_points = mini(DARKNESS_CAP, resource_points + amount)
+	return resource_points - before
+
+
+func _create_invasion_seed() -> int:
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	return rng.randi_range(1000, 999999)
 
 
 func _restart_game() -> void:
@@ -278,9 +317,14 @@ func _restart_game() -> void:
 
 func _refresh_ui() -> void:
 	status_label.text = "ФАЗА: %s" % _phase_title()
-	resource_label.text = "МРАК: %d  •  ЗАЩИТНИК: %d" % [resource_points, DEFENDER_COST]
+	resource_label.text = "МРАК %d/%d • КОПАТЬ %d • ЗАЩ. %d" % [
+		resource_points,
+		DARKNESS_CAP,
+		DIG_COST,
+		DEFENDER_COST,
+	]
 	timer_label.text = "ДО ВОЛНЫ: %02dс" % preparation_seconds if phase == Phase.PREPARATION else "ВТОРЖЕНИЕ"
-	hero_label.text = "ГЕРОЙ: —" if phase == Phase.PREPARATION else "ГЕРОЙ: %d/%d" % [hero_hp, HERO_MAX_HP]
+	hero_label.text = "SEED: %d" % invasion_seed if phase == Phase.PREPARATION else "ГЕРОЙ: %d/%d" % [hero_hp, HERO_MAX_HP]
 	hint_label.text = event_message
 
 	dig_button.disabled = phase != Phase.PREPARATION
@@ -291,10 +335,10 @@ func _refresh_ui() -> void:
 
 	match phase:
 		Phase.PREPARATION:
-			outcome_label.text = "Два защитника на жёлтом пути остановят героя. Новые тоннели могут создать опасный короткий маршрут."
+			outcome_label.text = "Маршрут #%d. Герой предпочитает спуск и новые тоннели. Сердце даёт +1 мрак каждые 2 секунды до лимита %d." % [invasion_seed, DARKNESS_CAP]
 			outcome_label.add_theme_color_override("font_color", Color(0.8, 0.76, 0.83, 1))
 		Phase.ASSAULT:
-			outcome_label.text = "ВТОРЖЕНИЕ\n\nСтроительство заблокировано. Наблюдайте за маршрутом и автобоем."
+			outcome_label.text = "ВТОРЖЕНИЕ\n\nСтроительство заблокировано. Герой идёт по жёлтому блуждающему маршруту #%d." % invasion_seed
 			outcome_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.31, 1))
 		Phase.WON:
 			outcome_label.text = "ПОБЕДА\n\nГерой уничтожен. Нажмите R, чтобы проверить другой маршрут."
@@ -317,7 +361,26 @@ func _phase_title() -> String:
 	return "НЕИЗВЕСТНО"
 
 
-func debug_run_to_completion(max_steps: int = 256) -> int:
+func debug_set_invasion_seed(seed_value: int) -> void:
+	invasion_seed = seed_value
+	_update_route_preview()
+	_refresh_ui()
+
+
+func debug_set_darkness(amount: int) -> void:
+	resource_points = clampi(amount, 0, DARKNESS_CAP)
+	_refresh_ui()
+
+
+func debug_get_darkness() -> int:
+	return resource_points
+
+
+func debug_generate_darkness_tick() -> void:
+	_on_darkness_timer_timeout()
+
+
+func debug_run_to_completion(max_steps: int = 512) -> int:
 	move_timer.stop()
 	combat_timer.stop()
 	build_timer.stop()

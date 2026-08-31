@@ -8,6 +8,7 @@ const WIDTH := 24
 const HEIGHT := 13
 const CELL_SIZE := 40
 const ORE_REWARD := 4
+const WANDER_STEP_BUDGET := 72
 const INVALID_CELL := Vector2i(-1, -1)
 const CARDINALS: Array[Vector2i] = [
 	Vector2i.RIGHT,
@@ -31,8 +32,8 @@ enum InteractionMode {
 
 var cells: Array = []
 var defenders: Dictionary = {}
-var entrance_cell := Vector2i(0, 2)
-var lord_cell := Vector2i(23, 10)
+var entrance_cell := Vector2i(5, 0)
+var lord_cell := Vector2i(20, 12)
 var hero_cell := INVALID_CELL
 var hero_hp := 0
 var hero_max_hp := 8
@@ -66,38 +67,40 @@ func reset_board() -> void:
 		row.fill(CellType.DIRT)
 		cells.append(row)
 
-	var route: Array[Vector2i] = []
-	for x in range(0, 7):
-		route.append(Vector2i(x, 2))
-	for y in range(3, 10):
-		route.append(Vector2i(6, y))
-	for x in range(7, 14):
-		route.append(Vector2i(x, 9))
-	for y in range(8, 4, -1):
-		route.append(Vector2i(13, y))
-	for x in range(14, 20):
-		route.append(Vector2i(x, 5))
+	for y in range(0, 5):
+		_set_cell(Vector2i(5, y), CellType.FLOOR)
+	for x in range(3, 14):
+		_set_cell(Vector2i(x, 4), CellType.FLOOR)
+	for y in range(4, 9):
+		_set_cell(Vector2i(3, y), CellType.FLOOR)
+	for x in range(3, 11):
+		_set_cell(Vector2i(x, 8), CellType.FLOOR)
+	for y in range(4, 11):
+		_set_cell(Vector2i(10, y), CellType.FLOOR)
+	for x in range(10, 19):
+		_set_cell(Vector2i(x, 6), CellType.FLOOR)
 	for y in range(6, 11):
-		route.append(Vector2i(19, y))
-	for x in range(20, 24):
-		route.append(Vector2i(x, 10))
-
-	for cell in route:
-		_set_cell(cell, CellType.FLOOR)
+		_set_cell(Vector2i(18, y), CellType.FLOOR)
+	for x in range(10, 22):
+		_set_cell(Vector2i(x, 10), CellType.FLOOR)
+	for y in range(4, 7):
+		_set_cell(Vector2i(13, y), CellType.FLOOR)
+	for y in range(10, 13):
+		_set_cell(Vector2i(20, y), CellType.FLOOR)
 
 	_set_cell(entrance_cell, CellType.ENTRANCE)
 	_set_cell(lord_cell, CellType.LORD)
 
 	var ore_cells: Array[Vector2i] = [
-		Vector2i(2, 1),
-		Vector2i(4, 3),
-		Vector2i(7, 8),
-		Vector2i(10, 8),
-		Vector2i(12, 10),
-		Vector2i(14, 4),
-		Vector2i(16, 6),
-		Vector2i(18, 4),
-		Vector2i(20, 9),
+		Vector2i(4, 1),
+		Vector2i(6, 2),
+		Vector2i(2, 5),
+		Vector2i(4, 7),
+		Vector2i(7, 7),
+		Vector2i(9, 5),
+		Vector2i(14, 5),
+		Vector2i(16, 7),
+		Vector2i(17, 9),
 		Vector2i(21, 11),
 	]
 	for cell in ore_cells:
@@ -246,6 +249,98 @@ func find_path(start: Vector2i, goal: Vector2i) -> Array[Vector2i]:
 	return path
 
 
+func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> Array[Vector2i]:
+	var no_route: Array[Vector2i] = []
+	if not is_walkable(start) or not is_walkable(goal):
+		return no_route
+	if find_path(start, goal).is_empty():
+		return no_route
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = seed_value
+	var route: Array[Vector2i] = [start]
+	var visit_count: Dictionary = {}
+	visit_count[start] = 1
+	var current := start
+	var previous := INVALID_CELL
+
+	for step in range(WANDER_STEP_BUDGET):
+		if current == goal:
+			return route
+
+		var candidates: Array[Vector2i] = []
+		for neighbor in _neighbors(current):
+			if is_walkable(neighbor):
+				candidates.append(neighbor)
+
+		if candidates.is_empty():
+			break
+		if previous != INVALID_CELL and candidates.size() > 1:
+			candidates.erase(previous)
+
+		var next_cell := _choose_wandering_candidate(
+			current,
+			goal,
+			candidates,
+			visit_count,
+			rng
+		)
+		previous = current
+		current = next_cell
+		route.append(current)
+		visit_count[current] = int(visit_count.get(current, 0)) + 1
+
+		if current == goal:
+			return route
+
+	var fallback := find_path(current, goal)
+	if fallback.is_empty():
+		return no_route
+	for index in range(1, fallback.size()):
+		route.append(fallback[index])
+	return route
+
+
+func _choose_wandering_candidate(
+	current: Vector2i,
+	goal: Vector2i,
+	candidates: Array[Vector2i],
+	visit_count: Dictionary,
+	rng: RandomNumberGenerator
+) -> Vector2i:
+	var weights: Array[float] = []
+	var total_weight := 0.0
+	var current_distance := absi(goal.x - current.x) + absi(goal.y - current.y)
+
+	for candidate in candidates:
+		var visits := int(visit_count.get(candidate, 0))
+		var weight := 1.0
+		if visits == 0:
+			weight += 5.0
+		else:
+			weight /= float(visits * 2 + 1)
+
+		if candidate.y > current.y:
+			weight += 3.2
+		elif candidate.y < current.y:
+			weight *= 0.55
+
+		var candidate_distance := absi(goal.x - candidate.x) + absi(goal.y - candidate.y)
+		if candidate_distance < current_distance:
+			weight += 1.2
+
+		weight *= rng.randf_range(0.75, 1.35)
+		weights.append(weight)
+		total_weight += weight
+
+	var roll := rng.randf() * total_weight
+	for index in range(candidates.size()):
+		roll -= weights[index]
+		if roll <= 0.0:
+			return candidates[index]
+	return candidates[candidates.size() - 1]
+
+
 func _neighbors(cell: Vector2i) -> Array[Vector2i]:
 	var result: Array[Vector2i] = []
 	for direction in CARDINALS:
@@ -345,9 +440,9 @@ func _draw() -> void:
 					var center := _cell_center(cell)
 					draw_colored_polygon(
 						PackedVector2Array([
-							center + Vector2(-12, 12),
-							center + Vector2(12, 12),
-							center + Vector2(0, -13),
+							center + Vector2(-12, -10),
+							center + Vector2(12, -10),
+							center + Vector2(0, 14),
 						]),
 						Color(0.32, 0.72, 0.95, 1)
 					)

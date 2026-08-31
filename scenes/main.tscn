@@ -19,6 +19,9 @@ wait_time = 0.45
 [node name="BuildTimer" type="Timer" parent="."]
 wait_time = 1.0
 
+[node name="DarknessTimer" type="Timer" parent="."]
+wait_time = 2.0
+
 [node name="HUD" type="CanvasLayer" parent="."]
 
 [node name="TopBar" type="ColorRect" parent="HUD"]
@@ -34,7 +37,7 @@ offset_right = 660.0
 offset_bottom = 48.0
 theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
 theme_override_font_sizes/font_size = 26
-text = "MY EVIL LORD — GRAYBOX v0.1"
+text = "MY EVIL LORD — GRAYBOX v0.2"
 
 [node name="StatusLabel" type="Label" parent="HUD/TopBar"]
 offset_left = 24.0
@@ -45,28 +48,28 @@ theme_override_colors/font_color = Color(0.87, 0.82, 0.9, 1)
 theme_override_font_sizes/font_size = 18
 
 [node name="ResourceLabel" type="Label" parent="HUD/TopBar"]
-offset_left = 410.0
+offset_left = 350.0
 offset_top = 58.0
-offset_right = 645.0
+offset_right = 695.0
 offset_bottom = 86.0
 theme_override_colors/font_color = Color(0.69, 0.94, 0.82, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 16
 
 [node name="TimerLabel" type="Label" parent="HUD/TopBar"]
-offset_left = 650.0
+offset_left = 700.0
 offset_top = 58.0
-offset_right = 825.0
+offset_right = 840.0
 offset_bottom = 86.0
 theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 16
 
 [node name="HeroLabel" type="Label" parent="HUD/TopBar"]
-offset_left = 830.0
+offset_left = 845.0
 offset_top = 58.0
 offset_right = 995.0
 offset_bottom = 86.0
 theme_override_colors/font_color = Color(0.95, 0.43, 0.37, 1)
-theme_override_font_sizes/font_size = 18
+theme_override_font_sizes/font_size = 16
 
 [node name="HintLabel" type="Label" parent="HUD/TopBar"]
 offset_left = 24.0
@@ -97,8 +100,8 @@ offset_top = 62.0
 offset_right = 252.0
 offset_bottom = 220.0
 theme_override_colors/font_color = Color(0.8, 0.76, 0.83, 1)
-theme_override_font_sizes/font_size = 15
-text = "1 / ЛКМ — копать\n2 / ЛКМ — защитник\nПКМ — убрать защитника\nEnter — начать вторжение\nR — перезапустить\n\nФиолетовая руда даёт мрак.\nГерой идёт по кратчайшему\nжёлтому маршруту."
+theme_override_font_sizes/font_size = 14
+text = "1 / ЛКМ — копать (−1)\n2 / ЛКМ — защитник (−4)\nПКМ — убрать (+2)\nEnter — начать вторжение\nR — перезапустить\n\nСердце: +1 мрак / 2с.\nЛимит запаса: 16. Руда: +4.\nЖёлтый прогноз зависит от seed.\nГерой блуждает и тянется вниз."
 
 [node name="DigButton" type="Button" parent="HUD/RightPanel"]
 offset_left = 20.0
@@ -152,5 +155,5 @@ offset_right = 252.0
 offset_bottom = 708.0
 theme_override_colors/font_color = Color(0.39, 0.35, 0.42, 1)
 theme_override_font_sizes/font_size = 12
-text = "Godot 4.7.2 • playable slice"
+text = "Godot 4.7.2 • graybox v0.2"
 horizontal_alignment = 1
