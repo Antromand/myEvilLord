@@ -19,8 +19,9 @@ func _capture() -> void:
 
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://tmp"))
 	var image := root.get_texture().get_image()
-	var output_path := "res://tmp/graybox-smoke.png"
-	var error := image.save_png(output_path)
+	image.resize(800, 450, Image.INTERPOLATE_LANCZOS)
+	var output_path := "res://tmp/graybox-smoke.jpg"
+	var error := image.save_jpg(output_path, 0.8)
 	if error == OK:
 		print("CAPTURED: ", ProjectSettings.globalize_path(output_path))
 	else:
