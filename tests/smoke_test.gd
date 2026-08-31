@@ -66,13 +66,16 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 
 	game.call("debug_set_darkness", 2)
 	game.call("_on_board_cell_clicked", plain_dirt)
-	_check(board.get_cell_type(plain_dirt) == GrayboxBoard.CellType.FLOOR, "Оплаченное копание создаёт тоннель.")
+	_check(board.is_lord_action_active(), "После клика Владыка начинает анимированный путь к блоку.")
+	_finish_lord_action(board)
+	_check(board.lord_cell == plain_dirt and board.is_walkable(plain_dirt), "Владыка доходит до блока и прокапывает его.")
 	_check(int(game.call("debug_get_darkness")) == 1, "Обычное копание списывает 1 мрак.")
 
 	var ore_cell := GrayboxBoard.FIRST_ORE_CELL
 	_check(board.can_dig(ore_cell), "Первая клетка руды доступна для раскопки.")
 	game.call("debug_set_darkness", 4)
 	game.call("_on_board_cell_clicked", ore_cell)
+	_finish_lord_action(board)
 	_check(int(game.call("debug_get_darkness")) == 7, "Руда даёт чистый прирост 3 после стоимости копания.")
 
 	game.call("debug_set_darkness", 998)
@@ -80,24 +83,16 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 	game.call("debug_generate_darkness_tick")
 	_check(int(game.call("debug_get_darkness")) == 999, "Пассивная генерация останавливается на отладочном лимите 999.")
 
-	game.call("_on_board_cell_clicked", board.lord_cell)
-	_check(
-		int(game.get("selected_mode")) == GrayboxBoard.InteractionMode.MOVE_LORD,
-		"Клик по Владыке включает режим его переноса."
-	)
-	game.call("_on_board_cell_clicked", board.lord_cell)
-	_check(
-		int(game.get("selected_mode")) == GrayboxBoard.InteractionMode.DIG,
-		"Повторный клик по Владыке выключает режим его переноса."
-	)
-	game.call("_on_board_cell_clicked", board.lord_cell)
-	game.call("_on_board_cell_clicked", plain_dirt)
-	_check(board.lord_cell == plain_dirt, "До вторжения Владыка переносится в свободную клетку.")
+	var prepared_side_cell := Vector2i(GrayboxBoard.ENTRANCE_X - 1, 2)
+	game.call("_on_board_cell_clicked", prepared_side_cell)
+	_finish_lord_action(board)
+	game.call("_on_board_cell_clicked", Vector2i(GrayboxBoard.ENTRANCE_X, 2))
+	_finish_lord_action(board)
+	_check(board.lord_cell == Vector2i(GrayboxBoard.ENTRANCE_X, 2), "Клик по пустому тоннелю заставляет Владыку дойти до него.")
 
 	var patrol_start := board.get_surface_knight_position()
 	board.call("_process", 0.5)
 	_check(board.get_surface_knight_position() != patrol_start, "До вторжения рыцарь патрулирует около замка.")
-	var previous_lord := board.lord_cell
 	var approach_start := board.get_surface_knight_position()
 	game.call("_start_assault")
 	_check(game.call("_phase_title") == "РЫЦАРЬ ИДЁТ К ПЕЩЕРЕ", "Вторжение начинается с подхода к пещере.")
@@ -116,21 +111,33 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 	game.call("_on_board_cell_clicked", pause_dig_cell)
 	_check(board.get_cell_type(pause_dig_cell) != GrayboxBoard.CellType.FLOOR, "Во время паузы строить нельзя.")
 
-	game.call("_set_mode", GrayboxBoard.InteractionMode.MOVE_LORD)
-	game.call("_on_board_cell_clicked", Vector2i(GrayboxBoard.ENTRANCE_X, 2))
-	_check(board.lord_cell == previous_lord, "После начала вторжения перенос Владыки заблокирован.")
-
 	game.call("_toggle_pause")
 	for step in range(20):
 		board.call("_process", 0.25)
 	_check(game.call("_phase_title") == "ВТОРЖЕНИЕ", "После визуального входа начинается подземное вторжение.")
 	_check(board.hero_cell == board.entrance_cell, "Герой появляется у входа только после входа в пещеру.")
 
+	game.call("_on_board_cell_clicked", prepared_side_cell)
+	_finish_lord_action(board)
+	_check(board.lord_cell == prepared_side_cell, "Во время вторжения Владыка перемещается по клику в пустой тоннель.")
+
+	game.call("_advance_hero")
+	var lord_before_blocked_move := board.lord_cell
+	game.call("_on_board_cell_clicked", board.entrance_cell)
+	_check(board.lord_cell == lord_before_blocked_move and not board.is_lord_action_active(), "Владыка не может переместиться за вторженца.")
+
+	var invasion_dig_cell := Vector2i(GrayboxBoard.ENTRANCE_X - 2, 2)
+	game.call("debug_set_darkness", 4)
+	game.call("_on_board_cell_clicked", invasion_dig_cell)
+	_finish_lord_action(board)
+	_check(board.lord_cell == invasion_dig_cell and board.is_walkable(invasion_dig_cell), "Во время вторжения Владыка продолжает копать.")
+
 	game.call("_toggle_pause")
 	game.call("_set_mode", GrayboxBoard.InteractionMode.DIG)
 	game.call("debug_set_darkness", 4)
-	game.call("_on_board_cell_clicked", pause_dig_cell)
-	_check(board.get_cell_type(pause_dig_cell) != GrayboxBoard.CellType.FLOOR, "На паузе вторжения доступен только осмотр.")
+	var paused_lord_cell := board.lord_cell
+	game.call("_on_board_cell_clicked", Vector2i(GrayboxBoard.ENTRANCE_X - 3, 2))
+	_check(board.lord_cell == paused_lord_cell and not board.is_lord_action_active(), "На паузе вторжения доступен только осмотр.")
 	game.call("_toggle_pause")
 
 	for button_name in ["DigButton", "DefenderButton", "MoveLordButton", "PauseButton", "StartButton", "RestartButton"]:
@@ -160,6 +167,10 @@ func _test_three_wave_win(packed_scene: PackedScene) -> void:
 	_check(placed, "Усиленный тестовый защитник поставлен на маршрут трёх волн.")
 
 	game.call("_start_assault")
+	game.call("debug_run_current_wave")
+	_check(game.call("_phase_title") == "СТРОИТЕЛЬСТВО", "После первой атаки снова начинается фаза строительства.")
+	_check(int(game.get("current_wave")) == 2, "Вторая фаза строительства готовит волну из двух героев.")
+	_check(int(game.get("defeated_attackers")) == 1, "В первой атаке участвовал один герой.")
 	game.call("debug_run_to_completion")
 	_check(game.call("_phase_title") == "ПОБЕДА", "Защита останавливает все три волны.")
 	_check(int(game.get("defeated_attackers")) == 6, "В волнах последовательно уничтожены 1 + 2 + 3 вторженца.")
@@ -179,6 +190,14 @@ func _create_game(packed_scene: PackedScene) -> Node:
 func _destroy_game(game: Node) -> void:
 	root.remove_child(game)
 	game.free()
+
+
+func _finish_lord_action(board: GrayboxBoard, max_steps: int = 128) -> void:
+	var steps := 0
+	while board.is_lord_action_active() and steps < max_steps:
+		board.call("_process", 0.1)
+		steps += 1
+	_check(not board.is_lord_action_active(), "Анимация действия Владыки завершается за допустимое время.")
 
 
 func _check(condition: bool, message: String) -> void:

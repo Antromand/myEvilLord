@@ -108,14 +108,12 @@ offset_right = 252.0
 offset_bottom = 210.0
 theme_override_colors/font_color = Color(0.8, 0.76, 0.83, 1)
 theme_override_font_sizes/font_size = 12
-text = "1 + ЛКМ — копать (−1)
-2 + ЛКМ — защитник (−4)
-3 или клик по Владыке — перенос
+text = "ЛКМ в тоннель — Владыка идёт
+ЛКМ в землю — идёт и копает (−1)
+2 + ЛКМ — защитник (стройка, −4)
 ПКМ — убрать защитника (+2)
-Enter — вторжение • R — рестарт
-Пробел — активная пауза
-Стрелки / края — прокрутка
-Биом меняется каждые 32 клетки."
+Enter — начать волну • R — рестарт
+Пробел — пауза • WASD — камера"
 autowrap_mode = 3
 
 [node name="DigButton" type="Button" parent="HUD/RightPanel" unique_id=1130536513]
