@@ -3,21 +3,25 @@ extends Node2D
 
 signal cell_clicked(cell: Vector2i)
 signal cell_right_clicked(cell: Vector2i)
+signal knight_entered_cave
 
-const WIDTH := 128
-const HEIGHT := 256
-const VIEW_WIDTH := 64
-const VIEW_HEIGHT := 32
-const BIOME_HEIGHT := 64
-const CELL_SIZE := 16
+const WIDTH := 64
+const HEIGHT := 128
+const VIEW_WIDTH := 32
+const VIEW_HEIGHT := 16
+const BIOME_HEIGHT := 32
+const CELL_SIZE := 32
 const SURFACE_HEIGHT := 96
 const ORE_REWARD := 4
-const WANDER_STEP_BUDGET := 8192
+const WANDER_STEP_BUDGET := 4096
 const INVALID_CELL := Vector2i(-1, -1)
-const ENTRANCE_X := 64
-const FIRST_ORE_CELL := Vector2i(65, 2)
+const ENTRANCE_X := 32
+const FIRST_ORE_CELL := Vector2i(33, 2)
 const CAMERA_STEP_SECONDS := 0.045
 const EDGE_SCROLL_MARGIN := 14.0
+const SURFACE_KNIGHT_SPEED := 72.0
+const SURFACE_PATROL_MIN_OFFSET := -260.0
+const SURFACE_PATROL_MAX_OFFSET := -190.0
 const CARDINALS: Array[Vector2i] = [
 	Vector2i.RIGHT,
 	Vector2i.DOWN,
@@ -55,6 +59,11 @@ var camera_cell := Vector2i(ENTRANCE_X - VIEW_WIDTH / 2, 0)
 var invasion_active := false
 var _pulse_time := 0.0
 var _scroll_accumulator := 0.0
+var _surface_knight_world_x := 0.0
+var _surface_knight_y := -21.0
+var _surface_knight_direction := 1.0
+var _surface_motion_paused := false
+var _surface_knight_entered := false
 
 
 func _ready() -> void:
@@ -63,6 +72,7 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_pulse_time += delta
+	_update_surface_knight(delta)
 	_update_camera_scroll(delta)
 	queue_redraw()
 
@@ -77,6 +87,11 @@ func reset_board() -> void:
 	lord_cell = Vector2i(ENTRANCE_X, 3)
 	camera_cell = Vector2i(ENTRANCE_X - VIEW_WIDTH / 2, 0)
 	invasion_active = false
+	_surface_knight_world_x = _surface_cave_world_x() - 220.0
+	_surface_knight_y = -21.0
+	_surface_knight_direction = 1.0
+	_surface_motion_paused = false
+	_surface_knight_entered = false
 
 	for y in range(HEIGHT):
 		var row: Array = []
@@ -111,8 +126,60 @@ func set_interaction(mode: int, enabled: bool) -> void:
 
 
 func set_invasion_active(active: bool) -> void:
+	if active and not invasion_active:
+		_surface_knight_entered = false
 	invasion_active = active
 	queue_redraw()
+
+
+func set_surface_motion_paused(paused: bool) -> void:
+	_surface_motion_paused = paused
+
+
+func has_knight_entered_cave() -> bool:
+	return _surface_knight_entered
+
+
+func get_surface_knight_position() -> float:
+	return _surface_knight_world_x
+
+
+func _surface_cave_world_x() -> float:
+	return entrance_cell.x * CELL_SIZE + CELL_SIZE * 0.5
+
+
+func _update_surface_knight(delta: float) -> void:
+	if _surface_motion_paused or _surface_knight_entered:
+		return
+	var cave_x := _surface_cave_world_x()
+	if invasion_active:
+		if not is_equal_approx(_surface_knight_world_x, cave_x):
+			_surface_knight_world_x = move_toward(
+				_surface_knight_world_x,
+				cave_x,
+				SURFACE_KNIGHT_SPEED * delta
+			)
+		else:
+			_surface_knight_y = move_toward(
+				_surface_knight_y,
+				-5.0,
+				SURFACE_KNIGHT_SPEED * 0.5 * delta
+			)
+		if is_equal_approx(_surface_knight_world_x, cave_x) and is_equal_approx(_surface_knight_y, -5.0):
+			_surface_knight_entered = true
+			knight_entered_cave.emit()
+		return
+
+	var patrol_min := cave_x + SURFACE_PATROL_MIN_OFFSET
+	var patrol_max := cave_x + SURFACE_PATROL_MAX_OFFSET
+	_surface_knight_y = -21.0
+	_surface_knight_world_x += _surface_knight_direction * SURFACE_KNIGHT_SPEED * 0.45 * delta
+	if _surface_knight_world_x >= patrol_max:
+		_surface_knight_world_x = patrol_max
+		_surface_knight_direction = -1.0
+	elif _surface_knight_world_x <= patrol_min:
+		_surface_knight_world_x = patrol_min
+		_surface_knight_direction = 1.0
 
 
 func set_preview_path(path: Array[Vector2i]) -> void:
@@ -198,7 +265,8 @@ func move_lord(cell: Vector2i) -> bool:
 
 
 func can_place_defender(cell: Vector2i) -> bool:
-	return is_inside(cell) and get_cell_type(cell) == CellType.FLOOR and not defenders.has(cell)
+	return is_inside(cell) and get_cell_type(cell) == CellType.FLOOR \
+		and not defenders.has(cell) and cell != hero_cell
 
 
 func place_defender(cell: Vector2i, hp: int) -> bool:
@@ -544,43 +612,43 @@ func _draw() -> void:
 			match cell_type:
 				CellType.DIRT:
 					draw_rect(inner, palette[0])
-					var grain_y := 5.0 if (x + y) % 2 == 0 else 11.0
+					var grain_y := 10.0 if (x + y) % 2 == 0 else 22.0
 					draw_line(
-						rect.position + Vector2(3, grain_y),
-						rect.position + Vector2(13, grain_y - 1),
+						rect.position + Vector2(6, grain_y),
+						rect.position + Vector2(26, grain_y - 2),
 						palette[2].darkened(0.35),
-						1.0
+						2.0
 					)
 				CellType.ORE:
 					draw_rect(inner, palette[0].lightened(0.04))
-					draw_circle(_cell_center(cell), 4.5, palette[2].lightened(0.25))
-					draw_circle(_cell_center(cell) + Vector2(-1.5, -1.5), 1.5, Color(0.96, 0.72, 1.0))
+					draw_circle(_cell_center(cell), 9.0, palette[2].lightened(0.25))
+					draw_circle(_cell_center(cell) + Vector2(-3, -3), 3.0, Color(0.96, 0.72, 1.0))
 				CellType.FLOOR:
 					draw_rect(inner, palette[1])
-					draw_circle(_cell_center(cell), 1.0, palette[0].lightened(0.12))
+					draw_circle(_cell_center(cell), 2.0, palette[0].lightened(0.12))
 				CellType.ENTRANCE:
 					draw_rect(inner, Color(0.06, 0.08, 0.11))
 					var center := _cell_center(cell)
 					draw_colored_polygon(
 						PackedVector2Array([
-							center + Vector2(-5, -4),
-							center + Vector2(5, -4),
-							center + Vector2(0, 6),
+							center + Vector2(-10, -8),
+							center + Vector2(10, -8),
+							center + Vector2(0, 12),
 						]),
 						Color(0.32, 0.72, 0.95)
 					)
 				CellType.LORD:
 					draw_rect(inner, Color(0.13, 0.045, 0.065))
 					var center := _cell_center(cell)
-					draw_circle(center, 5.5, Color(0.86, 0.16, 0.25))
-					draw_line(center + Vector2(-4, -3), center + Vector2(-6, -7), Color(1, 0.55, 0.35), 2.0)
-					draw_line(center + Vector2(4, -3), center + Vector2(6, -7), Color(1, 0.55, 0.35), 2.0)
+					draw_circle(center, 11.0, Color(0.86, 0.16, 0.25))
+					draw_line(center + Vector2(-8, -6), center + Vector2(-12, -14), Color(1, 0.55, 0.35), 4.0)
+					draw_line(center + Vector2(8, -6), center + Vector2(12, -14), Color(1, 0.55, 0.35), 4.0)
 
 			draw_rect(rect, Color(0.5, 0.4, 0.5, 0.16), false, 0.5)
 
 	for cell in preview_path:
 		if is_visible_cell(cell) and cell != entrance_cell and cell != lord_cell:
-			draw_circle(_cell_center(cell), 1.7, Color(0.95, 0.72, 0.23, 0.62))
+			draw_circle(_cell_center(cell), 3.4, Color(0.95, 0.72, 0.23, 0.62))
 
 	for key in defenders:
 		if is_visible_cell(key):
@@ -591,7 +659,7 @@ func _draw() -> void:
 
 	if interaction_enabled and is_visible_cell(hover_cell):
 		var outline_color := Color(0.34, 0.92, 0.68, 1) if hover_valid else Color(0.95, 0.28, 0.32, 0.85)
-		draw_rect(_cell_rect(hover_cell).grow(-1.0), outline_color, false, 1.5)
+		draw_rect(_cell_rect(hover_cell).grow(-2.0), outline_color, false, 3.0)
 
 	_draw_camera_status()
 
@@ -600,7 +668,7 @@ func _draw_surface_strip() -> void:
 	var strip := Rect2(Vector2(0, -SURFACE_HEIGHT), Vector2(VIEW_WIDTH * CELL_SIZE, SURFACE_HEIGHT))
 	draw_rect(strip, Color(0.055, 0.04, 0.075))
 	draw_rect(Rect2(Vector2(0, -18), Vector2(VIEW_WIDTH * CELL_SIZE, 18)), Color(0.13, 0.09, 0.1))
-	var cave_x := (entrance_cell.x - camera_cell.x) * CELL_SIZE + CELL_SIZE * 0.5
+	var cave_x := _surface_cave_world_x() - camera_cell.x * CELL_SIZE
 	if cave_x >= -24.0 and cave_x <= VIEW_WIDTH * CELL_SIZE + 24.0:
 		draw_circle(Vector2(cave_x, -13), 21.0, Color(0.19, 0.16, 0.2))
 		draw_circle(Vector2(cave_x, -8), 11.0, Color(0.025, 0.025, 0.04))
@@ -609,10 +677,9 @@ func _draw_surface_strip() -> void:
 		draw_rect(Rect2(Vector2(castle_x, -66), Vector2(58, 50)), Color(0.2, 0.19, 0.24))
 		draw_rect(Rect2(Vector2(castle_x + 8, -82), Vector2(13, 66)), Color(0.23, 0.22, 0.27))
 		draw_rect(Rect2(Vector2(castle_x + 37, -76), Vector2(13, 60)), Color(0.23, 0.22, 0.27))
-	var travel := fmod(_pulse_time * (42.0 if invasion_active else 18.0), 240.0)
-	var knight_x := cave_x - 210.0 + travel
-	if knight_x >= -10.0 and knight_x <= VIEW_WIDTH * CELL_SIZE + 10.0:
-		var knight_y := -21.0 + sin(_pulse_time * 8.0) * 1.5
+	var knight_x := _surface_knight_world_x - camera_cell.x * CELL_SIZE
+	if not _surface_knight_entered and knight_x >= -10.0 and knight_x <= VIEW_WIDTH * CELL_SIZE + 10.0:
+		var knight_y := _surface_knight_y + sin(_pulse_time * 8.0) * 1.5
 		draw_circle(Vector2(knight_x, knight_y - 8), 4.0, Color(0.82, 0.84, 0.9))
 		draw_line(Vector2(knight_x, knight_y - 4), Vector2(knight_x, knight_y + 7), Color(0.72, 0.74, 0.82), 4.0)
 		draw_line(Vector2(knight_x + 3, knight_y), Vector2(knight_x + 8, knight_y - 7), Color(0.95, 0.7, 0.25), 1.5)
@@ -634,9 +701,9 @@ func _draw_defender(cell: Vector2i, hp: int) -> void:
 	var center := _cell_center(cell)
 	var pulse := 0.5 + 0.5 * sin(_pulse_time * 3.0 + float(cell.x))
 	var body_color := Color(0.2, 0.74 + pulse * 0.08, 0.55, 1)
-	draw_circle(center, 5.8, Color(0.025, 0.12, 0.09, 1))
-	draw_circle(center, 4.6, body_color)
-	var bar_rect := Rect2(center + Vector2(-6, 6), Vector2(12, 1.5))
+	draw_circle(center, 11.6, Color(0.025, 0.12, 0.09, 1))
+	draw_circle(center, 9.2, body_color)
+	var bar_rect := Rect2(center + Vector2(-12, 12), Vector2(24, 3))
 	draw_rect(bar_rect, Color(0.08, 0.04, 0.08, 1))
 	draw_rect(
 		Rect2(bar_rect.position, Vector2(bar_rect.size.x * clampf(float(hp) / 3.0, 0.0, 1.0), bar_rect.size.y)),
@@ -646,18 +713,18 @@ func _draw_defender(cell: Vector2i, hp: int) -> void:
 
 func _draw_hero(cell: Vector2i) -> void:
 	var center := _cell_center(cell)
-	var bob := sin(_pulse_time * 8.0)
+	var bob := sin(_pulse_time * 8.0) * 2.0
 	center.y += bob
 	draw_colored_polygon(
 		PackedVector2Array([
-			center + Vector2(0, -6),
-			center + Vector2(5, 0),
-			center + Vector2(0, 6),
-			center + Vector2(-5, 0),
+			center + Vector2(0, -12),
+			center + Vector2(10, 0),
+			center + Vector2(0, 12),
+			center + Vector2(-10, 0),
 		]),
 		Color(0.96, 0.63, 0.22, 1)
 	)
-	var bar_rect := Rect2(center + Vector2(-7, -8), Vector2(14, 1.5))
+	var bar_rect := Rect2(center + Vector2(-14, -16), Vector2(28, 3))
 	draw_rect(bar_rect, Color(0.08, 0.04, 0.08, 1))
 	draw_rect(
 		Rect2(bar_rect.position, Vector2(bar_rect.size.x * clampf(float(hero_hp) / float(hero_max_hp), 0.0, 1.0), bar_rect.size.y)),

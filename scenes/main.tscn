@@ -37,7 +37,7 @@ offset_right = 660.0
 offset_bottom = 38.0
 theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
 theme_override_font_sizes/font_size = 26
-text = "MY EVIL LORD — GRAYBOX v0.3"
+text = "MY EVIL LORD — GRAYBOX v0.4"
 
 [node name="StatusLabel" type="Label" parent="HUD/TopBar"]
 offset_left = 24.0
@@ -98,56 +98,70 @@ text = "КАК ИГРАТЬ"
 offset_left = 20.0
 offset_top = 62.0
 offset_right = 252.0
-offset_bottom = 248.0
+offset_bottom = 210.0
 theme_override_colors/font_color = Color(0.8, 0.76, 0.83, 1)
 theme_override_font_sizes/font_size = 12
-text = "1 + ЛКМ — копать (−1)\n2 + ЛКМ — защитник (−4)\n3 + ЛКМ — перенести Владыку\nПКМ — убрать защитника (+2)\nEnter — вторжение • R — рестарт\nСтрелки / края — прокрутка\n\nБиом меняется каждые 64 клетки.\nПеренос — только до вторжения."
+text = "1 + ЛКМ — копать (−1)\n2 + ЛКМ — защитник (−4)\n3 или клик по Владыке — перенос\nПКМ — убрать защитника (+2)\nEnter — вторжение • R — рестарт\nПробел — активная пауза\nСтрелки / края — прокрутка\nБиом меняется каждые 32 клетки."
 autowrap_mode = 3
 
 [node name="DigButton" type="Button" parent="HUD/RightPanel"]
 offset_left = 20.0
-offset_top = 260.0
+offset_top = 220.0
 offset_right = 252.0
-offset_bottom = 302.0
+offset_bottom = 256.0
+focus_mode = 0
 theme_override_font_sizes/font_size = 17
 text = "1  КОПАТЬ"
 
 [node name="DefenderButton" type="Button" parent="HUD/RightPanel"]
 offset_left = 20.0
-offset_top = 312.0
+offset_top = 264.0
 offset_right = 252.0
-offset_bottom = 354.0
+offset_bottom = 300.0
+focus_mode = 0
 theme_override_font_sizes/font_size = 17
 text = "2  ЗАЩИТНИК"
 
 [node name="MoveLordButton" type="Button" parent="HUD/RightPanel"]
 offset_left = 20.0
-offset_top = 364.0
+offset_top = 308.0
 offset_right = 252.0
-offset_bottom = 406.0
+offset_bottom = 344.0
+focus_mode = 0
 theme_override_font_sizes/font_size = 17
 text = "3  ПЕРЕНЕСТИ"
 
 [node name="StartButton" type="Button" parent="HUD/RightPanel"]
 offset_left = 20.0
-offset_top = 420.0
+offset_top = 356.0
 offset_right = 252.0
-offset_bottom = 468.0
+offset_bottom = 400.0
+focus_mode = 0
 theme_override_colors/font_color = Color(0.95, 0.78, 0.37, 1)
 theme_override_font_sizes/font_size = 17
 text = "НАЧАТЬ ВТОРЖЕНИЕ"
 
+[node name="PauseButton" type="Button" parent="HUD/RightPanel"]
+offset_left = 20.0
+offset_top = 408.0
+offset_right = 252.0
+offset_bottom = 452.0
+focus_mode = 0
+theme_override_font_sizes/font_size = 16
+text = "Ⅱ  ПАУЗА"
+
 [node name="RestartButton" type="Button" parent="HUD/RightPanel"]
 offset_left = 20.0
-offset_top = 478.0
+offset_top = 460.0
 offset_right = 252.0
-offset_bottom = 520.0
+offset_bottom = 500.0
+focus_mode = 0
 theme_override_font_sizes/font_size = 16
 text = "ПЕРЕЗАПУСТИТЬ"
 
 [node name="OutcomeLabel" type="Label" parent="HUD/RightPanel"]
 offset_left = 20.0
-offset_top = 530.0
+offset_top = 510.0
 offset_right = 252.0
 offset_bottom = 670.0
 theme_override_colors/font_color = Color(0.8, 0.76, 0.83, 1)
@@ -164,5 +178,5 @@ offset_right = 252.0
 offset_bottom = 708.0
 theme_override_colors/font_color = Color(0.39, 0.35, 0.42, 1)
 theme_override_font_sizes/font_size = 12
-text = "Godot 4.7.2 • graybox v0.3"
+text = "Godot 4.7.2 • graybox v0.4"
 horizontal_alignment = 1
