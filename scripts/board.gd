@@ -16,6 +16,7 @@ const CELL_SIZE := 32
 const SURFACE_HEIGHT := 96
 const ORE_REWARD := 4
 const WANDER_STEP_BUDGET := 4096
+const MAX_WANDER_STALL_STEPS := 12
 const INVALID_CELL := Vector2i(-1, -1)
 const ENTRANCE_X := 32
 const FIRST_ORE_CELL := Vector2i(33, 2)
@@ -516,6 +517,9 @@ func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> 
 	var route: Array[Vector2i] = [start]
 	var visit_count: Dictionary = {}
 	visit_count[start] = 1
+	var distance_to_goal := _build_walkable_distance_map(goal)
+	var best_distance := int(distance_to_goal.get(start, 1 << 30))
+	var stalled_steps := 0
 	var current := start
 	var previous := INVALID_CELL
 
@@ -529,6 +533,14 @@ func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> 
 			current = forced_step
 			route.append(current)
 			visit_count[current] = int(visit_count.get(current, 0)) + 1
+			var forced_distance := int(distance_to_goal.get(current, 1 << 30))
+			if forced_distance < best_distance:
+				best_distance = forced_distance
+				stalled_steps = 0
+			else:
+				stalled_steps += 1
+			if stalled_steps >= MAX_WANDER_STALL_STEPS:
+				break
 			continue
 
 		var candidates: Array[Vector2i] = []
@@ -546,15 +558,24 @@ func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> 
 			goal,
 			candidates,
 			visit_count,
+			distance_to_goal,
 			rng
 		)
 		previous = current
 		current = next_cell
 		route.append(current)
 		visit_count[current] = int(visit_count.get(current, 0)) + 1
+		var current_distance := int(distance_to_goal.get(current, 1 << 30))
+		if current_distance < best_distance:
+			best_distance = current_distance
+			stalled_steps = 0
+		else:
+			stalled_steps += 1
 
 		if current == goal:
 			return route
+		if stalled_steps >= MAX_WANDER_STALL_STEPS:
+			break
 
 	var fallback := find_path(current, goal)
 	if fallback.is_empty():
@@ -562,6 +583,21 @@ func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> 
 	for index in range(1, fallback.size()):
 		route.append(fallback[index])
 	return route
+
+
+func _build_walkable_distance_map(goal: Vector2i) -> Dictionary:
+	var distances: Dictionary = {goal: 0}
+	var frontier: Array[Vector2i] = [goal]
+	var head := 0
+	while head < frontier.size():
+		var current := frontier[head]
+		head += 1
+		var next_distance := int(distances[current]) + 1
+		for neighbor in _neighbors(current):
+			if is_walkable(neighbor) and not distances.has(neighbor):
+				distances[neighbor] = next_distance
+				frontier.append(neighbor)
+	return distances
 
 
 func _straight_corridor_step(current: Vector2i, previous: Vector2i) -> Vector2i:
@@ -583,11 +619,12 @@ func _choose_wandering_candidate(
 	goal: Vector2i,
 	candidates: Array[Vector2i],
 	visit_count: Dictionary,
+	distance_to_goal: Dictionary,
 	rng: RandomNumberGenerator
 ) -> Vector2i:
 	var weights: Array[float] = []
 	var total_weight := 0.0
-	var current_distance := absi(goal.x - current.x) + absi(goal.y - current.y)
+	var current_distance := int(distance_to_goal.get(current, 1 << 30))
 
 	for candidate in candidates:
 		var visits := int(visit_count.get(candidate, 0))
@@ -602,9 +639,11 @@ func _choose_wandering_candidate(
 		elif candidate.y < current.y:
 			weight *= 0.55
 
-		var candidate_distance := absi(goal.x - candidate.x) + absi(goal.y - candidate.y)
+		var candidate_distance := int(distance_to_goal.get(candidate, 1 << 30))
 		if candidate_distance < current_distance:
-			weight += 1.2
+			weight += 4.0
+		elif candidate_distance > current_distance:
+			weight *= 0.3
 
 		weight *= rng.randf_range(0.75, 1.35)
 		weights.append(weight)

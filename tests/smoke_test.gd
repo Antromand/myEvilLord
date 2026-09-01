@@ -17,6 +17,7 @@ func _run() -> void:
 		return
 
 	_test_route_and_economy(packed_scene)
+	_test_dead_end_room_exit()
 	_test_loss_without_defenders(packed_scene)
 	_test_three_wave_win(packed_scene)
 	_finish()
@@ -186,6 +187,26 @@ func _test_three_wave_win(packed_scene: PackedScene) -> void:
 	_check(int(game.get("defeated_attackers")) == 6, "В волнах последовательно уничтожены 1 + 2 + 3 вторженца.")
 	_check(int(game.get("current_wave")) == 3, "Победа наступает после третьей волны.")
 	_destroy_game(game)
+
+
+func _test_dead_end_room_exit() -> void:
+	var board := GrayboxBoard.new()
+	root.add_child(board)
+	board.reset_board()
+	board.call("_set_cell", board.lord_cell, GrayboxBoard.CellType.FLOOR)
+	for y in range(2, 6):
+		for x in range(30, 35):
+			board.call("_set_cell", Vector2i(x, y), GrayboxBoard.CellType.FLOOR)
+	for x in range(32, 37):
+		board.call("_set_cell", Vector2i(x, 1), GrayboxBoard.CellType.FLOOR)
+	board.lord_cell = Vector2i(36, 1)
+	board.call("_set_cell", board.lord_cell, GrayboxBoard.CellType.LORD)
+
+	var route := board.build_wandering_route(Vector2i(33, 5), board.lord_cell, 760)
+	_check(not route.is_empty() and route[-1] == board.lord_cell, "Нападающий находит выход из тупиковой комнаты.")
+	_check(route.size() <= 32, "Нападающий покидает тупиковую комнату без долгого зацикливания.")
+	root.remove_child(board)
+	board.free()
 
 
 func _create_game(packed_scene: PackedScene) -> Node:
