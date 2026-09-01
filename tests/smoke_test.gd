@@ -58,6 +58,16 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 		board.lord_cell,
 	], "В узком стартовом коридоре герой идёт исключительно прямо.")
 
+	var defender_passage_cell := Vector2i(GrayboxBoard.ENTRANCE_X, 2)
+	var lord_passage_target := Vector2i(GrayboxBoard.ENTRANCE_X, 1)
+	_check(board.place_defender(defender_passage_cell, 3), "Защитник установлен между Владыкой и целью.")
+	game.call("_on_board_cell_clicked", lord_passage_target)
+	_finish_lord_action(board)
+	_check(board.lord_cell == lord_passage_target, "Защитник не блокирует проход Владыки.")
+	board.remove_defender(defender_passage_cell)
+	game.call("_on_board_cell_clicked", Vector2i(GrayboxBoard.ENTRANCE_X, 3))
+	_finish_lord_action(board)
+
 	var plain_dirt := Vector2i(GrayboxBoard.ENTRANCE_X - 1, 1)
 	game.call("debug_set_darkness", 0)
 	game.call("_on_board_cell_clicked", plain_dirt)

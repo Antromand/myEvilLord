@@ -377,7 +377,7 @@ func _build_lord_action_path(target: Vector2i, blocked_cell: Vector2i) -> Array[
 
 
 func _is_lord_passable(cell: Vector2i, blocked_cell: Vector2i) -> bool:
-	return is_walkable(cell) and cell != blocked_cell and not defenders.has(cell)
+	return is_walkable(cell) and cell != blocked_cell
 
 
 func _update_lord_action(delta: float) -> void:
