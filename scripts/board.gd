@@ -4,6 +4,8 @@ extends Node2D
 signal cell_clicked(cell: Vector2i)
 signal cell_right_clicked(cell: Vector2i)
 signal knight_entered_cave
+signal lord_cell_changed
+signal lord_action_finished(success: bool, did_dig: bool, reward: int)
 
 const WIDTH := 64
 const HEIGHT := 128
@@ -14,6 +16,7 @@ const CELL_SIZE := 32
 const SURFACE_HEIGHT := 96
 const ORE_REWARD := 4
 const WANDER_STEP_BUDGET := 4096
+const MAX_WANDER_STALL_STEPS := 12
 const INVALID_CELL := Vector2i(-1, -1)
 const ENTRANCE_X := 32
 const FIRST_ORE_CELL := Vector2i(33, 2)
@@ -22,6 +25,8 @@ const EDGE_SCROLL_MARGIN := 14.0
 const SURFACE_KNIGHT_SPEED := 72.0
 const SURFACE_PATROL_MIN_OFFSET := -260.0
 const SURFACE_PATROL_MAX_OFFSET := -190.0
+const LORD_MOVE_SPEED := 7.0
+const LORD_DIG_SECONDS := 0.45
 const CARDINALS: Array[Vector2i] = [
 	Vector2i.RIGHT,
 	Vector2i.DOWN,
@@ -50,6 +55,7 @@ var lord_cell := Vector2i(ENTRANCE_X, 3)
 var hero_cell := INVALID_CELL
 var hero_hp := 0
 var hero_max_hp := 8
+var attackers: Array[Dictionary] = []
 var interaction_enabled := true
 var interaction_mode := InteractionMode.DIG
 var hover_cell := INVALID_CELL
@@ -64,6 +70,13 @@ var _surface_knight_y := -21.0
 var _surface_knight_direction := 1.0
 var _surface_motion_paused := false
 var _surface_knight_entered := false
+var _lord_visual_cell := Vector2.ZERO
+var _lord_action_path: Array[Vector2i] = []
+var _lord_action_index := 0
+var _lord_action_target := INVALID_CELL
+var _lord_action_digs := false
+var _lord_target_was_ore := false
+var _lord_dig_elapsed := 0.0
 
 
 func _ready() -> void:
@@ -73,6 +86,7 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_pulse_time += delta
 	_update_surface_knight(delta)
+	_update_lord_action(delta)
 	_update_camera_scroll(delta)
 	queue_redraw()
 
@@ -82,6 +96,7 @@ func reset_board() -> void:
 	defenders.clear()
 	hero_cell = INVALID_CELL
 	hero_hp = 0
+	attackers.clear()
 	preview_path.clear()
 	entrance_cell = Vector2i(ENTRANCE_X, 0)
 	lord_cell = Vector2i(ENTRANCE_X, 3)
@@ -92,6 +107,8 @@ func reset_board() -> void:
 	_surface_knight_direction = 1.0
 	_surface_motion_paused = false
 	_surface_knight_entered = false
+	_lord_visual_cell = Vector2(lord_cell)
+	_clear_lord_action()
 
 	for y in range(HEIGHT):
 		var row: Array = []
@@ -188,16 +205,60 @@ func set_preview_path(path: Array[Vector2i]) -> void:
 
 
 func set_hero(cell: Vector2i, hp: int, max_hp: int) -> void:
-	hero_cell = cell
-	hero_hp = hp
-	hero_max_hp = max_hp
+	set_attackers([{
+		"id": 0,
+		"cell": cell,
+		"hp": hp,
+		"max_hp": max_hp,
+	}])
+
+
+func set_attackers(snapshots: Array) -> void:
+	attackers.clear()
+	for snapshot in snapshots:
+		attackers.append({
+			"id": int(snapshot.get("id", attackers.size())),
+			"cell": snapshot.get("cell", INVALID_CELL),
+			"hp": int(snapshot.get("hp", 0)),
+			"max_hp": int(snapshot.get("max_hp", 8)),
+		})
+	_sync_primary_hero()
 	queue_redraw()
 
 
 func clear_hero() -> void:
+	clear_attackers()
+
+
+func clear_attackers() -> void:
+	attackers.clear()
 	hero_cell = INVALID_CELL
 	hero_hp = 0
 	queue_redraw()
+
+
+func _sync_primary_hero() -> void:
+	if attackers.is_empty():
+		hero_cell = INVALID_CELL
+		hero_hp = 0
+		return
+	hero_cell = attackers[0]["cell"]
+	hero_hp = int(attackers[0]["hp"])
+	hero_max_hp = int(attackers[0]["max_hp"])
+
+
+func has_hero_at(cell: Vector2i) -> bool:
+	for attacker in attackers:
+		if attacker["cell"] == cell:
+			return true
+	return false
+
+
+func get_hero_cells() -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	for attacker in attackers:
+		result.append(attacker["cell"])
+	return result
 
 
 func is_inside(cell: Vector2i) -> bool:
@@ -250,7 +311,7 @@ func dig_cell(cell: Vector2i) -> int:
 
 func can_move_lord(cell: Vector2i) -> bool:
 	return is_inside(cell) and get_cell_type(cell) == CellType.FLOOR \
-		and not defenders.has(cell) and cell != hero_cell
+		and not defenders.has(cell) and not has_hero_at(cell)
 
 
 func move_lord(cell: Vector2i) -> bool:
@@ -264,9 +325,163 @@ func move_lord(cell: Vector2i) -> bool:
 	return true
 
 
+func is_lord_action_active() -> bool:
+	return not _lord_action_path.is_empty()
+
+
+func lord_action_requires_dig(cell: Vector2i) -> bool:
+	var cell_type := get_cell_type(cell)
+	return cell_type == CellType.DIRT or cell_type == CellType.ORE
+
+
+func can_command_lord(target: Vector2i, blocked_cell: Vector2i = INVALID_CELL) -> bool:
+	return not is_lord_action_active() and not _build_lord_action_path(target, blocked_cell).is_empty()
+
+
+func begin_lord_action(target: Vector2i, blocked_cell: Vector2i = INVALID_CELL) -> bool:
+	if is_lord_action_active():
+		return false
+	var path := _build_lord_action_path(target, blocked_cell)
+	if path.is_empty():
+		return false
+	_lord_action_path = path
+	_lord_action_index = 0
+	_lord_action_target = target
+	_lord_action_digs = lord_action_requires_dig(target)
+	_lord_target_was_ore = get_cell_type(target) == CellType.ORE
+	_lord_dig_elapsed = 0.0
+	queue_redraw()
+	return true
+
+
+func is_behind_hero(target: Vector2i) -> bool:
+	if attackers.is_empty():
+		return false
+	var furthest_hero_distance := -1
+	for attacker in attackers:
+		var hero_path := find_path(entrance_cell, attacker["cell"])
+		if not hero_path.is_empty():
+			furthest_hero_distance = maxi(furthest_hero_distance, hero_path.size() - 1)
+	if furthest_hero_distance < 0:
+		return false
+	var target_distance := 1 << 30
+	if is_walkable(target):
+		var target_path := find_path(entrance_cell, target)
+		if not target_path.is_empty():
+			target_distance = target_path.size() - 1
+	else:
+		for neighbor in _neighbors(target):
+			if not is_walkable(neighbor):
+				continue
+			var neighbor_path := find_path(entrance_cell, neighbor)
+			if not neighbor_path.is_empty():
+				target_distance = mini(target_distance, neighbor_path.size())
+	return target_distance < furthest_hero_distance
+
+
+func _build_lord_action_path(target: Vector2i, blocked_cell: Vector2i) -> Array[Vector2i]:
+	var no_path: Array[Vector2i] = []
+	if not is_inside(target) or target == lord_cell or target == blocked_cell or has_hero_at(target):
+		return no_path
+	var target_type := get_cell_type(target)
+	var needs_dig := target_type == CellType.DIRT or target_type == CellType.ORE
+	if not needs_dig and target_type != CellType.FLOOR and target_type != CellType.ENTRANCE:
+		return no_path
+	if defenders.has(target):
+		return no_path
+
+	var goals: Array[Vector2i] = [target]
+	if needs_dig:
+		goals.clear()
+		for neighbor in _neighbors(target):
+			if _is_lord_passable(neighbor, blocked_cell):
+				goals.append(neighbor)
+	if goals.is_empty():
+		return no_path
+
+	var frontier: Array[Vector2i] = [lord_cell]
+	var came_from: Dictionary = {lord_cell: INVALID_CELL}
+	var reached := INVALID_CELL
+	var head := 0
+	while head < frontier.size() and reached == INVALID_CELL:
+		var current := frontier[head]
+		head += 1
+		if goals.has(current):
+			reached = current
+			break
+		for neighbor in _neighbors(current):
+			if _is_lord_passable(neighbor, blocked_cell) and not came_from.has(neighbor):
+				came_from[neighbor] = current
+				frontier.append(neighbor)
+	if reached == INVALID_CELL:
+		return no_path
+
+	var path: Array[Vector2i] = []
+	var cursor := reached
+	while cursor != lord_cell:
+		path.push_front(cursor)
+		cursor = came_from[cursor]
+	path.push_front(lord_cell)
+	if needs_dig:
+		path.append(target)
+	return path
+
+
+func _is_lord_passable(cell: Vector2i, blocked_cell: Vector2i) -> bool:
+	return is_walkable(cell) and cell != blocked_cell and not has_hero_at(cell)
+
+
+func _update_lord_action(delta: float) -> void:
+	if _surface_motion_paused or _lord_action_path.is_empty():
+		return
+	if _lord_action_index >= _lord_action_path.size() - 1:
+		_finish_lord_action(true)
+		return
+
+	var next_cell := _lord_action_path[_lord_action_index + 1]
+	if has_hero_at(next_cell) or is_behind_hero(next_cell):
+		_finish_lord_action(false)
+		return
+	if _lord_action_digs and next_cell == _lord_action_target and not is_walkable(next_cell):
+		_lord_dig_elapsed += delta
+		if _lord_dig_elapsed < LORD_DIG_SECONDS:
+			queue_redraw()
+			return
+		_set_cell(next_cell, CellType.FLOOR)
+
+	var next_visual := Vector2(next_cell)
+	_lord_visual_cell = _lord_visual_cell.move_toward(next_visual, LORD_MOVE_SPEED * delta)
+	if not _lord_visual_cell.is_equal_approx(next_visual):
+		return
+	_set_cell(lord_cell, CellType.FLOOR)
+	lord_cell = next_cell
+	_set_cell(lord_cell, CellType.LORD)
+	_lord_action_index += 1
+	lord_cell_changed.emit()
+	_refresh_hover_validity()
+	if _lord_action_index >= _lord_action_path.size() - 1:
+		_finish_lord_action(true)
+
+
+func _finish_lord_action(success: bool) -> void:
+	var did_dig := _lord_action_digs and is_walkable(_lord_action_target)
+	var reward := ORE_REWARD if did_dig and _lord_target_was_ore else 0
+	_clear_lord_action()
+	lord_action_finished.emit(success, did_dig, reward)
+
+
+func _clear_lord_action() -> void:
+	_lord_action_path.clear()
+	_lord_action_index = 0
+	_lord_action_target = INVALID_CELL
+	_lord_action_digs = false
+	_lord_target_was_ore = false
+	_lord_dig_elapsed = 0.0
+
+
 func can_place_defender(cell: Vector2i) -> bool:
 	return is_inside(cell) and get_cell_type(cell) == CellType.FLOOR \
-		and not defenders.has(cell) and cell != hero_cell
+		and not defenders.has(cell) and not has_hero_at(cell)
 
 
 func place_defender(cell: Vector2i, hp: int) -> bool:
@@ -352,6 +567,9 @@ func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> 
 	var route: Array[Vector2i] = [start]
 	var visit_count: Dictionary = {}
 	visit_count[start] = 1
+	var distance_to_goal := _build_walkable_distance_map(goal)
+	var best_distance := int(distance_to_goal.get(start, 1 << 30))
+	var stalled_steps := 0
 	var current := start
 	var previous := INVALID_CELL
 
@@ -365,6 +583,14 @@ func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> 
 			current = forced_step
 			route.append(current)
 			visit_count[current] = int(visit_count.get(current, 0)) + 1
+			var forced_distance := int(distance_to_goal.get(current, 1 << 30))
+			if forced_distance < best_distance:
+				best_distance = forced_distance
+				stalled_steps = 0
+			else:
+				stalled_steps += 1
+			if stalled_steps >= MAX_WANDER_STALL_STEPS:
+				break
 			continue
 
 		var candidates: Array[Vector2i] = []
@@ -382,15 +608,24 @@ func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> 
 			goal,
 			candidates,
 			visit_count,
+			distance_to_goal,
 			rng
 		)
 		previous = current
 		current = next_cell
 		route.append(current)
 		visit_count[current] = int(visit_count.get(current, 0)) + 1
+		var current_distance := int(distance_to_goal.get(current, 1 << 30))
+		if current_distance < best_distance:
+			best_distance = current_distance
+			stalled_steps = 0
+		else:
+			stalled_steps += 1
 
 		if current == goal:
 			return route
+		if stalled_steps >= MAX_WANDER_STALL_STEPS:
+			break
 
 	var fallback := find_path(current, goal)
 	if fallback.is_empty():
@@ -398,6 +633,21 @@ func build_wandering_route(start: Vector2i, goal: Vector2i, seed_value: int) -> 
 	for index in range(1, fallback.size()):
 		route.append(fallback[index])
 	return route
+
+
+func _build_walkable_distance_map(goal: Vector2i) -> Dictionary:
+	var distances: Dictionary = {goal: 0}
+	var frontier: Array[Vector2i] = [goal]
+	var head := 0
+	while head < frontier.size():
+		var current := frontier[head]
+		head += 1
+		var next_distance := int(distances[current]) + 1
+		for neighbor in _neighbors(current):
+			if is_walkable(neighbor) and not distances.has(neighbor):
+				distances[neighbor] = next_distance
+				frontier.append(neighbor)
+	return distances
 
 
 func _straight_corridor_step(current: Vector2i, previous: Vector2i) -> Vector2i:
@@ -419,11 +669,12 @@ func _choose_wandering_candidate(
 	goal: Vector2i,
 	candidates: Array[Vector2i],
 	visit_count: Dictionary,
+	distance_to_goal: Dictionary,
 	rng: RandomNumberGenerator
 ) -> Vector2i:
 	var weights: Array[float] = []
 	var total_weight := 0.0
-	var current_distance := absi(goal.x - current.x) + absi(goal.y - current.y)
+	var current_distance := int(distance_to_goal.get(current, 1 << 30))
 
 	for candidate in candidates:
 		var visits := int(visit_count.get(candidate, 0))
@@ -438,9 +689,11 @@ func _choose_wandering_candidate(
 		elif candidate.y < current.y:
 			weight *= 0.55
 
-		var candidate_distance := absi(goal.x - candidate.x) + absi(goal.y - candidate.y)
+		var candidate_distance := int(distance_to_goal.get(candidate, 1 << 30))
 		if candidate_distance < current_distance:
-			weight += 1.2
+			weight += 4.0
+		elif candidate_distance > current_distance:
+			weight *= 0.3
 
 		weight *= rng.randf_range(0.75, 1.35)
 		weights.append(weight)
@@ -568,11 +821,11 @@ func _refresh_hover_validity() -> void:
 		return
 	match interaction_mode:
 		InteractionMode.DIG:
-			hover_valid = can_dig(hover_cell)
+			hover_valid = can_command_lord(hover_cell, hero_cell)
 		InteractionMode.DEFENDER:
 			hover_valid = can_place_defender(hover_cell)
 		InteractionMode.MOVE_LORD:
-			hover_valid = can_move_lord(hover_cell)
+			hover_valid = can_command_lord(hover_cell, hero_cell)
 
 
 func _cell_rect(cell: Vector2i) -> Rect2:
@@ -639,10 +892,7 @@ func _draw() -> void:
 					)
 				CellType.LORD:
 					draw_rect(inner, Color(0.13, 0.045, 0.065))
-					var center := _cell_center(cell)
-					draw_circle(center, 11.0, Color(0.86, 0.16, 0.25))
-					draw_line(center + Vector2(-8, -6), center + Vector2(-12, -14), Color(1, 0.55, 0.35), 4.0)
-					draw_line(center + Vector2(8, -6), center + Vector2(12, -14), Color(1, 0.55, 0.35), 4.0)
+					draw_circle(_cell_center(cell), 3.0, Color(0.52, 0.09, 0.15))
 
 			draw_rect(rect, Color(0.5, 0.4, 0.5, 0.16), false, 0.5)
 
@@ -654,8 +904,11 @@ func _draw() -> void:
 		if is_visible_cell(key):
 			_draw_defender(key, int(defenders[key]))
 
-	if hero_cell != INVALID_CELL and is_visible_cell(hero_cell):
-		_draw_hero(hero_cell)
+	_draw_lord()
+
+	for attacker in attackers:
+		if is_visible_cell(attacker["cell"]):
+			_draw_hero(attacker["cell"], int(attacker["hp"]), int(attacker["max_hp"]), int(attacker["id"]))
 
 	if interaction_enabled and is_visible_cell(hover_cell):
 		var outline_color := Color(0.34, 0.92, 0.68, 1) if hover_valid else Color(0.95, 0.28, 0.32, 0.85)
@@ -711,9 +964,27 @@ func _draw_defender(cell: Vector2i, hp: int) -> void:
 	)
 
 
-func _draw_hero(cell: Vector2i) -> void:
+func _draw_lord() -> void:
+	var visual_screen := (_lord_visual_cell - Vector2(camera_cell)) * CELL_SIZE
+	var center := visual_screen + Vector2(CELL_SIZE * 0.5, CELL_SIZE * 0.5)
+	if center.x < -20.0 or center.y < -20.0 \
+		or center.x > VIEW_WIDTH * CELL_SIZE + 20.0 \
+		or center.y > VIEW_HEIGHT * CELL_SIZE + 20.0:
+		return
+	if _lord_action_digs and _lord_action_index < _lord_action_path.size() - 1 \
+		and _lord_action_path[_lord_action_index + 1] == _lord_action_target \
+		and not is_walkable(_lord_action_target):
+		center += Vector2(sin(_pulse_time * 34.0) * 2.5, 0.0)
+	draw_circle(center, 11.0, Color(0.86, 0.16, 0.25))
+	draw_line(center + Vector2(-8, -6), center + Vector2(-12, -14), Color(1, 0.55, 0.35), 4.0)
+	draw_line(center + Vector2(8, -6), center + Vector2(12, -14), Color(1, 0.55, 0.35), 4.0)
+	if _lord_action_digs:
+		draw_line(center + Vector2(7, 2), center + Vector2(15, -8), Color(0.78, 0.72, 0.68), 2.0)
+
+
+func _draw_hero(cell: Vector2i, hp: int, max_hp: int, attacker_id: int = 0) -> void:
 	var center := _cell_center(cell)
-	var bob := sin(_pulse_time * 8.0) * 2.0
+	var bob := sin(_pulse_time * 8.0 + float(attacker_id) * 0.7) * 2.0
 	center.y += bob
 	draw_colored_polygon(
 		PackedVector2Array([
@@ -727,6 +998,6 @@ func _draw_hero(cell: Vector2i) -> void:
 	var bar_rect := Rect2(center + Vector2(-14, -16), Vector2(28, 3))
 	draw_rect(bar_rect, Color(0.08, 0.04, 0.08, 1))
 	draw_rect(
-		Rect2(bar_rect.position, Vector2(bar_rect.size.x * clampf(float(hero_hp) / float(hero_max_hp), 0.0, 1.0), bar_rect.size.y)),
+		Rect2(bar_rect.position, Vector2(bar_rect.size.x * clampf(float(hp) / float(max_hp), 0.0, 1.0), bar_rect.size.y)),
 		Color(0.92, 0.25, 0.22, 1)
 	)
