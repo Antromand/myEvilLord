@@ -55,6 +55,7 @@ var lord_cell := Vector2i(ENTRANCE_X, 3)
 var hero_cell := INVALID_CELL
 var hero_hp := 0
 var hero_max_hp := 8
+var attackers: Array[Dictionary] = []
 var interaction_enabled := true
 var interaction_mode := InteractionMode.DIG
 var hover_cell := INVALID_CELL
@@ -95,6 +96,7 @@ func reset_board() -> void:
 	defenders.clear()
 	hero_cell = INVALID_CELL
 	hero_hp = 0
+	attackers.clear()
 	preview_path.clear()
 	entrance_cell = Vector2i(ENTRANCE_X, 0)
 	lord_cell = Vector2i(ENTRANCE_X, 3)
@@ -203,16 +205,60 @@ func set_preview_path(path: Array[Vector2i]) -> void:
 
 
 func set_hero(cell: Vector2i, hp: int, max_hp: int) -> void:
-	hero_cell = cell
-	hero_hp = hp
-	hero_max_hp = max_hp
+	set_attackers([{
+		"id": 0,
+		"cell": cell,
+		"hp": hp,
+		"max_hp": max_hp,
+	}])
+
+
+func set_attackers(snapshots: Array) -> void:
+	attackers.clear()
+	for snapshot in snapshots:
+		attackers.append({
+			"id": int(snapshot.get("id", attackers.size())),
+			"cell": snapshot.get("cell", INVALID_CELL),
+			"hp": int(snapshot.get("hp", 0)),
+			"max_hp": int(snapshot.get("max_hp", 8)),
+		})
+	_sync_primary_hero()
 	queue_redraw()
 
 
 func clear_hero() -> void:
+	clear_attackers()
+
+
+func clear_attackers() -> void:
+	attackers.clear()
 	hero_cell = INVALID_CELL
 	hero_hp = 0
 	queue_redraw()
+
+
+func _sync_primary_hero() -> void:
+	if attackers.is_empty():
+		hero_cell = INVALID_CELL
+		hero_hp = 0
+		return
+	hero_cell = attackers[0]["cell"]
+	hero_hp = int(attackers[0]["hp"])
+	hero_max_hp = int(attackers[0]["max_hp"])
+
+
+func has_hero_at(cell: Vector2i) -> bool:
+	for attacker in attackers:
+		if attacker["cell"] == cell:
+			return true
+	return false
+
+
+func get_hero_cells() -> Array[Vector2i]:
+	var result: Array[Vector2i] = []
+	for attacker in attackers:
+		result.append(attacker["cell"])
+	return result
 
 
 func is_inside(cell: Vector2i) -> bool:
@@ -265,7 +311,7 @@ func dig_cell(cell: Vector2i) -> int:
 
 func can_move_lord(cell: Vector2i) -> bool:
 	return is_inside(cell) and get_cell_type(cell) == CellType.FLOOR \
-		and not defenders.has(cell) and cell != hero_cell
+		and not defenders.has(cell) and not has_hero_at(cell)
 
 
 func move_lord(cell: Vector2i) -> bool:
@@ -309,10 +355,14 @@ func begin_lord_action(target: Vector2i, blocked_cell: Vector2i = INVALID_CELL) 
 
 
 func is_behind_hero(target: Vector2i) -> bool:
-	if hero_cell == INVALID_CELL:
+	if attackers.is_empty():
 		return false
-	var hero_path := find_path(entrance_cell, hero_cell)
-	if hero_path.is_empty():
+	var furthest_hero_distance := -1
+	for attacker in attackers:
+		var hero_path := find_path(entrance_cell, attacker["cell"])
+		if not hero_path.is_empty():
+			furthest_hero_distance = maxi(furthest_hero_distance, hero_path.size() - 1)
+	if furthest_hero_distance < 0:
 		return false
 	var target_distance := 1 << 30
 	if is_walkable(target):
@@ -326,12 +376,12 @@ func is_behind_hero(target: Vector2i) -> bool:
 			var neighbor_path := find_path(entrance_cell, neighbor)
 			if not neighbor_path.is_empty():
 				target_distance = mini(target_distance, neighbor_path.size())
-	return target_distance < hero_path.size() - 1
+	return target_distance < furthest_hero_distance
 
 
 func _build_lord_action_path(target: Vector2i, blocked_cell: Vector2i) -> Array[Vector2i]:
 	var no_path: Array[Vector2i] = []
-	if not is_inside(target) or target == lord_cell or target == blocked_cell:
+	if not is_inside(target) or target == lord_cell or target == blocked_cell or has_hero_at(target):
 		return no_path
 	var target_type := get_cell_type(target)
 	var needs_dig := target_type == CellType.DIRT or target_type == CellType.ORE
@@ -378,7 +428,7 @@ func _build_lord_action_path(target: Vector2i, blocked_cell: Vector2i) -> Array[
 
 
 func _is_lord_passable(cell: Vector2i, blocked_cell: Vector2i) -> bool:
-	return is_walkable(cell) and cell != blocked_cell
+	return is_walkable(cell) and cell != blocked_cell and not has_hero_at(cell)
 
 
 func _update_lord_action(delta: float) -> void:
@@ -389,7 +439,7 @@ func _update_lord_action(delta: float) -> void:
 		return
 
 	var next_cell := _lord_action_path[_lord_action_index + 1]
-	if next_cell == hero_cell or is_behind_hero(next_cell):
+	if has_hero_at(next_cell) or is_behind_hero(next_cell):
 		_finish_lord_action(false)
 		return
 	if _lord_action_digs and next_cell == _lord_action_target and not is_walkable(next_cell):
@@ -431,7 +481,7 @@ func _clear_lord_action() -> void:
 
 func can_place_defender(cell: Vector2i) -> bool:
 	return is_inside(cell) and get_cell_type(cell) == CellType.FLOOR \
-		and not defenders.has(cell) and cell != hero_cell
+		and not defenders.has(cell) and not has_hero_at(cell)
 
 
 func place_defender(cell: Vector2i, hp: int) -> bool:
@@ -856,8 +906,9 @@ func _draw() -> void:
 
 	_draw_lord()
 
-	if hero_cell != INVALID_CELL and is_visible_cell(hero_cell):
-		_draw_hero(hero_cell)
+	for attacker in attackers:
+		if is_visible_cell(attacker["cell"]):
+			_draw_hero(attacker["cell"], int(attacker["hp"]), int(attacker["max_hp"]), int(attacker["id"]))
 
 	if interaction_enabled and is_visible_cell(hover_cell):
 		var outline_color := Color(0.34, 0.92, 0.68, 1) if hover_valid else Color(0.95, 0.28, 0.32, 0.85)
@@ -931,9 +982,9 @@ func _draw_lord() -> void:
 		draw_line(center + Vector2(7, 2), center + Vector2(15, -8), Color(0.78, 0.72, 0.68), 2.0)
 
 
-func _draw_hero(cell: Vector2i) -> void:
+func _draw_hero(cell: Vector2i, hp: int, max_hp: int, attacker_id: int = 0) -> void:
 	var center := _cell_center(cell)
-	var bob := sin(_pulse_time * 8.0) * 2.0
+	var bob := sin(_pulse_time * 8.0 + float(attacker_id) * 0.7) * 2.0
 	center.y += bob
 	draw_colored_polygon(
 		PackedVector2Array([
@@ -947,6 +998,6 @@ func _draw_hero(cell: Vector2i) -> void:
 	var bar_rect := Rect2(center + Vector2(-14, -16), Vector2(28, 3))
 	draw_rect(bar_rect, Color(0.08, 0.04, 0.08, 1))
 	draw_rect(
-		Rect2(bar_rect.position, Vector2(bar_rect.size.x * clampf(float(hero_hp) / float(hero_max_hp), 0.0, 1.0), bar_rect.size.y)),
+		Rect2(bar_rect.position, Vector2(bar_rect.size.x * clampf(float(hp) / float(max_hp), 0.0, 1.0), bar_rect.size.y)),
 		Color(0.92, 0.25, 0.22, 1)
 	)

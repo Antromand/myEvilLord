@@ -16,6 +16,9 @@ wait_time = 0.3
 [node name="CombatTimer" type="Timer" parent="." unique_id=1140228369]
 wait_time = 0.45
 
+[node name="SpawnTimer" type="Timer" parent="."]
+wait_time = 0.9
+
 [node name="BuildTimer" type="Timer" parent="." unique_id=998230607]
 
 [node name="DarknessTimer" type="Timer" parent="." unique_id=2012859958]

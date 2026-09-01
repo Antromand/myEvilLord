@@ -25,6 +25,7 @@ enum Phase {
 @onready var board: GrayboxBoard = $Board
 @onready var move_timer: Timer = $MoveTimer
 @onready var combat_timer: Timer = $CombatTimer
+@onready var spawn_timer: Timer = $SpawnTimer
 @onready var build_timer: Timer = $BuildTimer
 @onready var darkness_timer: Timer = $DarknessTimer
 
@@ -56,7 +57,10 @@ var current_wave := 1
 var attackers_left_in_wave := 1
 var attacker_number_in_wave := 0
 var defeated_attackers := 0
+var defeated_in_wave := 0
 var pending_lord_dig_cost := 0
+var active_attackers: Array[Dictionary] = []
+var next_attacker_id := 1
 
 
 func _ready() -> void:
@@ -67,6 +71,7 @@ func _ready() -> void:
 	board.lord_action_finished.connect(_on_lord_action_finished)
 	move_timer.timeout.connect(_on_move_timer_timeout)
 	combat_timer.timeout.connect(_on_combat_timer_timeout)
+	spawn_timer.timeout.connect(_on_spawn_timer_timeout)
 	build_timer.timeout.connect(_on_build_timer_timeout)
 	darkness_timer.timeout.connect(_on_darkness_timer_timeout)
 	dig_button.pressed.connect(_on_dig_button_pressed)
@@ -89,7 +94,10 @@ func _ready() -> void:
 	attackers_left_in_wave = 1
 	attacker_number_in_wave = 0
 	defeated_attackers = 0
+	defeated_in_wave = 0
 	pending_lord_dig_cost = 0
+	active_attackers.clear()
+	next_attacker_id = 1
 	invasion_seed = _create_invasion_seed()
 	board.set_interaction(selected_mode, true)
 	board.set_invasion_active(false)
@@ -278,15 +286,11 @@ func _update_route_preview() -> void:
 
 
 func _rebuild_active_route() -> void:
-	if phase != Phase.ASSAULT or board.hero_cell == INVALID_CELL:
+	if phase != Phase.ASSAULT or active_attackers.is_empty():
 		return
-	current_route = board.build_wandering_route(
-		board.hero_cell,
-		board.lord_cell,
-		invasion_seed + defeated_attackers
-	)
-	route_index = 0
-	board.set_preview_path(current_route)
+	for index in range(active_attackers.size()):
+		_rebuild_attacker_route(index)
+	_sync_board_attackers()
 
 
 func _start_assault() -> void:
@@ -307,12 +311,15 @@ func _start_assault() -> void:
 	hero_hp = HERO_MAX_HP
 	attackers_left_in_wave = current_wave
 	attacker_number_in_wave = 0
+	defeated_in_wave = 0
+	active_attackers.clear()
+	spawn_timer.stop()
 	if selected_mode == GrayboxBoard.InteractionMode.DEFENDER:
 		selected_mode = GrayboxBoard.InteractionMode.DIG
 	board.set_interaction(selected_mode, true)
 	board.set_surface_motion_paused(false)
 	board.set_invasion_active(true)
-	board.clear_hero()
+	board.clear_attackers()
 	event_message = "Волна %d/3 началась: к пещере идут %d героев." % [current_wave, current_wave]
 	_refresh_ui()
 
@@ -322,24 +329,47 @@ func _on_knight_entered_cave() -> void:
 		return
 	phase = Phase.ASSAULT
 	_spawn_next_attacker()
+	if attacker_number_in_wave < current_wave:
+		spawn_timer.start()
+	move_timer.start()
+	combat_timer.start()
 	_refresh_ui()
 
 
-func _spawn_next_attacker() -> void:
+func _spawn_next_attacker() -> bool:
+	if attacker_number_in_wave >= current_wave or _is_attacker_cell_occupied(board.entrance_cell):
+		return false
 	_update_route_preview()
-	hero_hp = HERO_MAX_HP
-	route_index = 0
-	combat_cell = INVALID_CELL
+	if current_route.is_empty():
+		return false
+	var attacker_id := next_attacker_id
+	next_attacker_id += 1
 	attacker_number_in_wave += 1
-	board.set_hero(current_route[0], hero_hp, HERO_MAX_HP)
+	active_attackers.append({
+		"id": attacker_id,
+		"cell": board.entrance_cell,
+		"hp": HERO_MAX_HP,
+		"max_hp": HERO_MAX_HP,
+		"route": current_route.duplicate(),
+		"route_index": 0,
+		"combat_cell": INVALID_CELL,
+	})
+	_sync_board_attackers()
 	event_message = "Волна %d/3: вторженец %d/%d начал спуск с %d HP." % [
 		current_wave,
 		attacker_number_in_wave,
 		current_wave,
 		HERO_MAX_HP,
 	]
-	if not game_paused:
-		move_timer.start()
+	if attacker_number_in_wave >= current_wave:
+		spawn_timer.stop()
+	return true
+
+
+func _on_spawn_timer_timeout() -> void:
+	if game_paused or phase != Phase.ASSAULT:
+		return
+	_spawn_next_attacker()
 
 
 func _toggle_pause() -> void:
@@ -350,6 +380,7 @@ func _toggle_pause() -> void:
 	if game_paused:
 		move_timer.stop()
 		combat_timer.stop()
+		spawn_timer.stop()
 		build_timer.stop()
 		darkness_timer.stop()
 		board.set_interaction(selected_mode, false)
@@ -360,10 +391,10 @@ func _toggle_pause() -> void:
 			build_timer.start()
 			darkness_timer.start()
 		elif phase == Phase.ASSAULT:
-			if combat_cell == INVALID_CELL:
-				move_timer.start()
-			else:
-				combat_timer.start()
+			move_timer.start()
+			combat_timer.start()
+			if attacker_number_in_wave < current_wave:
+				spawn_timer.start()
 		event_message = "Пауза снята."
 	_refresh_ui()
 
@@ -373,33 +404,43 @@ func _on_move_timer_timeout() -> void:
 
 
 func _advance_hero() -> void:
-	if game_paused or phase != Phase.ASSAULT or combat_cell != INVALID_CELL:
+	if game_paused or phase != Phase.ASSAULT:
 		return
-	if route_index >= current_route.size() - 1:
-		if board.hero_cell == board.lord_cell:
+	for index in range(active_attackers.size()):
+		var attacker := active_attackers[index]
+		if attacker["combat_cell"] != INVALID_CELL:
+			continue
+		var attacker_route: Array = attacker["route"]
+		var attacker_route_index := int(attacker["route_index"])
+		if attacker_route_index >= attacker_route.size() - 1:
+			_rebuild_attacker_route(index)
+			attacker = active_attackers[index]
+			attacker_route = attacker["route"]
+			attacker_route_index = int(attacker["route_index"])
+			if attacker_route.size() <= 1:
+				if attacker["cell"] == board.lord_cell:
+					_lose_game()
+					return
+				continue
+		var next_cell: Vector2i = attacker_route[attacker_route_index + 1]
+		if _is_attacker_cell_occupied(next_cell, int(attacker["id"])):
+			attacker["route"] = board.find_path(attacker["cell"], board.lord_cell)
+			attacker["route_index"] = 0
+			active_attackers[index] = attacker
+			continue
+		attacker["route_index"] = attacker_route_index + 1
+		attacker["cell"] = next_cell
+		if board.has_defender(next_cell):
+			attacker["combat_cell"] = next_cell
+			event_message = "Герой столкнулся с защитником."
+		active_attackers[index] = attacker
+		if next_cell == board.lord_cell:
+			active_attackers[index] = attacker
+			_sync_board_attackers()
 			_lose_game()
-		else:
-			_rebuild_active_route()
-			if current_route.size() > 1:
-				move_timer.start()
-		return
-
-	route_index += 1
-	var next_cell := current_route[route_index]
-	board.set_hero(next_cell, hero_hp, HERO_MAX_HP)
-
-	if board.has_defender(next_cell):
-		move_timer.stop()
-		combat_cell = next_cell
-		event_message = "Герой столкнулся с защитником."
-		combat_timer.start()
-		_refresh_ui()
-		return
-
-	if next_cell == board.lord_cell:
-		_lose_game()
-	else:
-		_refresh_ui()
+			return
+	_sync_board_attackers()
+	_refresh_ui()
 
 
 func _on_combat_timer_timeout() -> void:
@@ -407,42 +448,100 @@ func _on_combat_timer_timeout() -> void:
 
 
 func _resolve_combat_round() -> void:
-	if game_paused or phase != Phase.ASSAULT or combat_cell == INVALID_CELL:
+	if game_paused or phase != Phase.ASSAULT:
 		return
-
-	hero_hp = max(0, hero_hp - DEFENDER_ATTACK)
-	var defender_hp := board.damage_defender(combat_cell, HERO_ATTACK)
-	board.set_hero(combat_cell, hero_hp, HERO_MAX_HP)
-
-	if hero_hp <= 0:
-		_complete_current_attacker()
-		return
-
-	if defender_hp <= 0:
-		combat_timer.stop()
-		event_message = "Защитник погиб, герой продолжает путь с %d HP." % hero_hp
-		combat_cell = INVALID_CELL
-		move_timer.start()
-	else:
-		event_message = "Автобой: герой %d HP, защитник %d HP." % [hero_hp, defender_hp]
+	var defeated_ids: Array[int] = []
+	for index in range(active_attackers.size()):
+		var attacker := active_attackers[index]
+		var attacker_combat_cell: Vector2i = attacker["combat_cell"]
+		if attacker_combat_cell == INVALID_CELL:
+			continue
+		if not board.has_defender(attacker_combat_cell):
+			attacker["combat_cell"] = INVALID_CELL
+			active_attackers[index] = attacker
+			continue
+		attacker["hp"] = maxi(0, int(attacker["hp"]) - DEFENDER_ATTACK)
+		var defender_hp := board.damage_defender(attacker_combat_cell, HERO_ATTACK)
+		if int(attacker["hp"]) <= 0:
+			defeated_ids.append(int(attacker["id"]))
+		elif defender_hp <= 0:
+			attacker["combat_cell"] = INVALID_CELL
+			event_message = "Защитник погиб, герои продолжают путь."
+		else:
+			event_message = "Автобой: герой %d HP, защитник %d HP." % [int(attacker["hp"]), defender_hp]
+		active_attackers[index] = attacker
+	for attacker_id in defeated_ids:
+		_complete_attacker(attacker_id)
+	_sync_board_attackers()
 	_refresh_ui()
 
 
-func _complete_current_attacker() -> void:
+func _complete_attacker(attacker_id: int) -> void:
+	for index in range(active_attackers.size() - 1, -1, -1):
+		if int(active_attackers[index]["id"]) == attacker_id:
+			active_attackers.remove_at(index)
+			break
+	defeated_attackers += 1
+	defeated_in_wave += 1
+	attackers_left_in_wave = maxi(0, current_wave - defeated_in_wave)
+	_check_wave_complete()
+
+
+func _check_wave_complete() -> void:
+	if defeated_in_wave < current_wave or not active_attackers.is_empty():
+		return
 	move_timer.stop()
 	combat_timer.stop()
-	board.clear_hero()
-	combat_cell = INVALID_CELL
-	defeated_attackers += 1
-	attackers_left_in_wave -= 1
-	if attackers_left_in_wave > 0:
-		_spawn_next_attacker()
-		_refresh_ui()
-		return
+	spawn_timer.stop()
 	if current_wave < TOTAL_WAVES:
 		_begin_next_preparation()
+	else:
+		_win_game()
+
+
+func _rebuild_attacker_route(index: int) -> void:
+	if index < 0 or index >= active_attackers.size():
 		return
-	_win_game()
+	var attacker := active_attackers[index]
+	var attacker_route := board.build_wandering_route(
+		attacker["cell"],
+		board.lord_cell,
+		invasion_seed + int(attacker["id"])
+	)
+	attacker["route"] = attacker_route
+	attacker["route_index"] = 0
+	active_attackers[index] = attacker
+
+
+func _is_attacker_cell_occupied(cell: Vector2i, except_id: int = -1) -> bool:
+	for attacker in active_attackers:
+		if int(attacker["id"]) != except_id and attacker["cell"] == cell:
+			return true
+	return false
+
+
+func _sync_board_attackers() -> void:
+	var snapshots: Array = []
+	for attacker in active_attackers:
+		snapshots.append({
+			"id": attacker["id"],
+			"cell": attacker["cell"],
+			"hp": attacker["hp"],
+			"max_hp": attacker["max_hp"],
+		})
+	board.set_attackers(snapshots)
+	if active_attackers.is_empty():
+		hero_hp = HERO_MAX_HP
+		combat_cell = INVALID_CELL
+		return
+	var primary := active_attackers[0]
+	hero_hp = int(primary["hp"])
+	combat_cell = primary["combat_cell"]
+	route_index = int(primary["route_index"])
+	current_route.clear()
+	for cell in primary["route"]:
+		current_route.append(cell)
+	board.set_preview_path(current_route)
 
 
 func _begin_next_preparation() -> void:
@@ -451,8 +550,11 @@ func _begin_next_preparation() -> void:
 	preparation_seconds = PREPARATION_SECONDS
 	attackers_left_in_wave = current_wave
 	attacker_number_in_wave = 0
+	defeated_in_wave = 0
+	active_attackers.clear()
+	spawn_timer.stop()
 	board.set_invasion_active(false)
-	board.clear_hero()
+	board.clear_attackers()
 	board.set_interaction(selected_mode, true)
 	build_timer.start()
 	darkness_timer.start()
@@ -466,9 +568,11 @@ func _win_game() -> void:
 	game_paused = false
 	move_timer.stop()
 	combat_timer.stop()
+	spawn_timer.stop()
 	build_timer.stop()
 	darkness_timer.stop()
-	board.clear_hero()
+	active_attackers.clear()
+	board.clear_attackers()
 	board.set_surface_motion_paused(false)
 	board.set_interaction(selected_mode, false)
 	event_message = "Все три волны и шесть вторженцев уничтожены. Подземелье выстояло."
@@ -480,10 +584,11 @@ func _lose_game() -> void:
 	game_paused = false
 	move_timer.stop()
 	combat_timer.stop()
+	spawn_timer.stop()
 	build_timer.stop()
 	darkness_timer.stop()
 	combat_cell = INVALID_CELL
-	board.set_hero(board.lord_cell, hero_hp, HERO_MAX_HP)
+	_sync_board_attackers()
 	board.set_surface_motion_paused(false)
 	board.set_interaction(selected_mode, false)
 	event_message = "Герой добрался до Владыки."
@@ -543,12 +648,11 @@ func _refresh_ui() -> void:
 	if phase == Phase.PREPARATION or phase == Phase.APPROACH:
 		hero_label.text = "ВОЛНА %d/3 • ГЕРОЕВ %d" % [current_wave, current_wave]
 	else:
-		hero_label.text = "ВОЛНА %d/3 • ВРАГ %d/%d • HP %d/%d" % [
+		hero_label.text = "ВОЛНА %d/3 • АКТИВНО %d • ВЫШЛО %d/%d" % [
 			current_wave,
+			active_attackers.size(),
 			attacker_number_in_wave,
 			current_wave,
-			hero_hp,
-			HERO_MAX_HP,
 		]
 	hint_label.text = event_message
 
@@ -619,6 +723,7 @@ func debug_generate_darkness_tick() -> void:
 func debug_run_to_completion(max_steps: int = 512) -> int:
 	move_timer.stop()
 	combat_timer.stop()
+	spawn_timer.stop()
 	build_timer.stop()
 	var steps := 0
 	while phase != Phase.WON and phase != Phase.LOST and steps < max_steps:
@@ -627,12 +732,13 @@ func debug_run_to_completion(max_steps: int = 512) -> int:
 		if phase == Phase.APPROACH:
 			_on_knight_entered_cave()
 		elif phase == Phase.ASSAULT:
-			if combat_cell == INVALID_CELL:
-				_advance_hero()
-			else:
-				_resolve_combat_round()
+			if attacker_number_in_wave < current_wave:
+				_spawn_next_attacker()
+			_advance_hero()
+			_resolve_combat_round()
 		move_timer.stop()
 		combat_timer.stop()
+		spawn_timer.stop()
 		steps += 1
 	return phase
 
@@ -640,17 +746,19 @@ func debug_run_to_completion(max_steps: int = 512) -> int:
 func debug_run_current_wave(max_steps: int = 256) -> int:
 	move_timer.stop()
 	combat_timer.stop()
+	spawn_timer.stop()
 	build_timer.stop()
 	if phase == Phase.APPROACH:
 		_on_knight_entered_cave()
 	var starting_wave := current_wave
 	var steps := 0
 	while phase == Phase.ASSAULT and current_wave == starting_wave and steps < max_steps:
-		if combat_cell == INVALID_CELL:
-			_advance_hero()
-		else:
-			_resolve_combat_round()
+		if attacker_number_in_wave < current_wave:
+			_spawn_next_attacker()
+		_advance_hero()
+		_resolve_combat_round()
 		move_timer.stop()
 		combat_timer.stop()
+		spawn_timer.stop()
 		steps += 1
 	return phase

@@ -182,6 +182,17 @@ func _test_three_wave_win(packed_scene: PackedScene) -> void:
 	_check(game.call("_phase_title") == "СТРОИТЕЛЬСТВО", "После первой атаки снова начинается фаза строительства.")
 	_check(int(game.get("current_wave")) == 2, "Вторая фаза строительства готовит волну из двух героев.")
 	_check(int(game.get("defeated_attackers")) == 1, "В первой атаке участвовал один герой.")
+	game.call("_start_assault")
+	game.call("_on_knight_entered_cave")
+	game.call("_advance_hero")
+	game.call("_on_spawn_timer_timeout")
+	var active_attackers: Array = game.get("active_attackers")
+	_check(active_attackers.size() == 2, "Второй герой выходит, пока первый герой ещё жив.")
+	_check(
+		active_attackers[0]["cell"] != active_attackers[1]["cell"],
+		"Герои выходят друг за другом и не занимают одну клетку."
+	)
+	_check(int(game.get("defeated_attackers")) == 1, "Выход следующего героя не зависит от смерти предыдущего.")
 	game.call("debug_run_to_completion")
 	_check(game.call("_phase_title") == "ПОБЕДА", "Защита останавливает все три волны.")
 	_check(int(game.get("defeated_attackers")) == 6, "В волнах последовательно уничтожены 1 + 2 + 3 вторженца.")
@@ -214,6 +225,7 @@ func _create_game(packed_scene: PackedScene) -> Node:
 	root.add_child(game)
 	game.get_node("BuildTimer").stop()
 	game.get_node("DarknessTimer").stop()
+	game.get_node("SpawnTimer").stop()
 	game.call("debug_set_invasion_seed", TEST_SEED)
 	return game
 
