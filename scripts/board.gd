@@ -821,11 +821,11 @@ func _refresh_hover_validity() -> void:
 		return
 	match interaction_mode:
 		InteractionMode.DIG:
-			hover_valid = can_command_lord(hover_cell, hero_cell)
+			hover_valid = can_dig(hover_cell)
 		InteractionMode.DEFENDER:
 			hover_valid = can_place_defender(hover_cell)
 		InteractionMode.MOVE_LORD:
-			hover_valid = can_command_lord(hover_cell, hero_cell)
+			hover_valid = is_walkable(hover_cell) and can_command_lord(hover_cell, hero_cell)
 
 
 func _cell_rect(cell: Vector2i) -> Rect2:

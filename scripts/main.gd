@@ -58,7 +58,6 @@ var attackers_left_in_wave := 1
 var attacker_number_in_wave := 0
 var defeated_attackers := 0
 var defeated_in_wave := 0
-var pending_lord_dig_cost := 0
 var active_attackers: Array[Dictionary] = []
 var next_attacker_id := 1
 
@@ -95,7 +94,6 @@ func _ready() -> void:
 	attacker_number_in_wave = 0
 	defeated_attackers = 0
 	defeated_in_wave = 0
-	pending_lord_dig_cost = 0
 	active_attackers.clear()
 	next_attacker_id = 1
 	invasion_seed = _create_invasion_seed()
@@ -133,6 +131,10 @@ func _on_board_cell_clicked(cell: Vector2i) -> void:
 	if not _can_control_lord() and not _can_build():
 		return
 
+	if selected_mode == GrayboxBoard.InteractionMode.DIG:
+		_dig_cell(cell)
+		return
+
 	if selected_mode == GrayboxBoard.InteractionMode.DEFENDER:
 		if not _can_build():
 			event_message = "Защитников можно выращивать только в фазе строительства."
@@ -154,6 +156,31 @@ func _on_board_cell_clicked(cell: Vector2i) -> void:
 	_command_lord(cell)
 
 
+func _dig_cell(cell: Vector2i) -> void:
+	if not _can_control_lord():
+		return
+	if resource_points < DIG_COST:
+		event_message = "Недостаточно мрака. Копание стоит %d." % DIG_COST
+		_refresh_ui()
+		return
+	if not board.can_dig(cell):
+		event_message = "Копать можно только клетку рядом с существующим тоннелем."
+		_refresh_ui()
+		return
+	resource_points -= DIG_COST
+	var reward := board.dig_cell(cell)
+	var gained := _add_darkness(reward)
+	if reward > 0:
+		event_message = "Руда: копание −%d, получено +%d мрака." % [DIG_COST, gained]
+	else:
+		event_message = "Новый тоннель проложен за %d мрак." % DIG_COST
+	if phase == Phase.ASSAULT:
+		_rebuild_active_route()
+	else:
+		_update_route_preview()
+	_refresh_ui()
+
+
 func _command_lord(cell: Vector2i) -> void:
 	if not _can_control_lord():
 		return
@@ -165,9 +192,8 @@ func _command_lord(cell: Vector2i) -> void:
 		event_message = "Владыка не может переместиться за вторженца."
 		_refresh_ui()
 		return
-	var needs_dig := board.lord_action_requires_dig(cell)
-	if needs_dig and resource_points < DIG_COST:
-		event_message = "Недостаточно мрака для копания."
+	if board.lord_action_requires_dig(cell):
+		event_message = "Сначала прокопайте клетку инструментом «Копать»."
 		_refresh_ui()
 		return
 	var blocked_cell := board.hero_cell if phase == Phase.ASSAULT else INVALID_CELL
@@ -175,9 +201,7 @@ func _command_lord(cell: Vector2i) -> void:
 		event_message = "Владыка не может добраться сюда: путь занят или клетка недоступна."
 		_refresh_ui()
 		return
-	pending_lord_dig_cost = DIG_COST if needs_dig else 0
-	resource_points -= pending_lord_dig_cost
-	event_message = "Владыка идёт копать отмеченный блок." if needs_dig else "Владыка идёт в указанное место."
+	event_message = "Владыка идёт в указанное место."
 	_refresh_ui()
 
 
@@ -188,20 +212,11 @@ func _on_lord_cell_changed() -> void:
 		_update_route_preview()
 
 
-func _on_lord_action_finished(success: bool, did_dig: bool, reward: int) -> void:
+func _on_lord_action_finished(success: bool, _did_dig: bool, _reward: int) -> void:
 	if not success:
-		if did_dig:
-			_add_darkness(reward)
-			event_message = "Владыка успел выкопать блок, но остановился перед вторженцем."
-		else:
-			_add_darkness(pending_lord_dig_cost)
-			event_message = "Путь перекрыт вторженцем — Владыка остановился."
-	elif did_dig:
-		var gained := _add_darkness(reward)
-		event_message = "Владыка закончил копать. Получено %d мрака." % gained if reward > 0 else "Владыка закончил копать."
+		event_message = "Путь перекрыт вторженцем — Владыка остановился."
 	else:
 		event_message = "Владыка прибыл на место."
-	pending_lord_dig_cost = 0
 	if phase == Phase.ASSAULT:
 		_rebuild_active_route()
 	else:
@@ -259,11 +274,11 @@ func _set_mode(mode: int) -> void:
 	board.set_interaction(selected_mode, true)
 	match mode:
 		GrayboxBoard.InteractionMode.DIG:
-			event_message = "Режим Владыки: клик задаёт путь или блок для копания."
+			event_message = "Режим: кликните по доступной клетке земли, чтобы прокопать её."
 		GrayboxBoard.InteractionMode.DEFENDER:
 			event_message = "Режим: выращивать защитников."
 		GrayboxBoard.InteractionMode.MOVE_LORD:
-			event_message = "Режим Владыки: клик задаёт путь или блок для копания."
+			event_message = "Режим Владыки: кликните по свободному тоннелю."
 	_refresh_ui()
 
 
@@ -670,13 +685,13 @@ func _refresh_ui() -> void:
 
 	match phase:
 		Phase.PREPARATION:
-			outcome_label.text = "СТРОИТЕЛЬСТВО %d/3\n\nКликните в тоннель — Владыка пойдёт туда. Кликните в землю — сам дойдёт и выкопает блок." % current_wave
+			outcome_label.text = "СТРОИТЕЛЬСТВО %d/3\n\n1 + клик по земле — копать. 3 + клик по тоннелю — переместить Владыку." % current_wave
 			outcome_label.add_theme_color_override("font_color", Color(0.8, 0.76, 0.83, 1))
 		Phase.APPROACH:
-			outcome_label.text = "АТАКА %d/3\n\nВ этой волне %d героев. Владыка может двигаться и копать." % [current_wave, current_wave]
+			outcome_label.text = "АТАКА %d/3\n\nВ этой волне %d героев. Копайте кликом или перемещайте Владыку по тоннелям." % [current_wave, current_wave]
 			outcome_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.31, 1))
 		Phase.ASSAULT:
-			outcome_label.text = "АТАКА %d/3\n\nВладыка может двигаться и копать, но не может пройти за вторженца." % current_wave
+			outcome_label.text = "АТАКА %d/3\n\nКопайте кликом. Владыка может двигаться по тоннелям, но не может пройти за вторженца." % current_wave
 			outcome_label.add_theme_color_override("font_color", Color(0.95, 0.72, 0.31, 1))
 		Phase.WON:
 			outcome_label.text = "ПОБЕДА\n\nВсе шесть вторженцев уничтожены. Нажмите R, чтобы начать заново."

@@ -62,6 +62,7 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 	var defender_passage_cell := Vector2i(GrayboxBoard.ENTRANCE_X, 2)
 	var lord_passage_target := Vector2i(GrayboxBoard.ENTRANCE_X, 1)
 	_check(board.place_defender(defender_passage_cell, 3), "Защитник установлен между Владыкой и целью.")
+	game.call("_set_mode", GrayboxBoard.InteractionMode.MOVE_LORD)
 	game.call("_on_board_cell_clicked", lord_passage_target)
 	_finish_lord_action(board)
 	_check(board.lord_cell == lord_passage_target, "Защитник не блокирует проход Владыки.")
@@ -70,23 +71,25 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 	_finish_lord_action(board)
 
 	var plain_dirt := Vector2i(GrayboxBoard.ENTRANCE_X - 1, 1)
+	game.call("_on_board_cell_clicked", plain_dirt)
+	_check(board.get_cell_type(plain_dirt) == GrayboxBoard.CellType.DIRT and not board.is_lord_action_active(), "Режим Владыки не отправляет персонажа копать землю.")
+	game.call("_set_mode", GrayboxBoard.InteractionMode.DIG)
 	game.call("debug_set_darkness", 0)
 	game.call("_on_board_cell_clicked", plain_dirt)
 	_check(board.get_cell_type(plain_dirt) == GrayboxBoard.CellType.DIRT, "При нулевом мраке копание заблокировано.")
 	_check(int(game.call("debug_get_darkness")) == 0, "Заблокированное копание не уводит ресурс в минус.")
 
 	game.call("debug_set_darkness", 2)
+	var lord_before_dig := board.lord_cell
 	game.call("_on_board_cell_clicked", plain_dirt)
-	_check(board.is_lord_action_active(), "После клика Владыка начинает анимированный путь к блоку.")
-	_finish_lord_action(board)
-	_check(board.lord_cell == plain_dirt and board.is_walkable(plain_dirt), "Владыка доходит до блока и прокапывает его.")
+	_check(board.is_walkable(plain_dirt), "Клик по доступной земле сразу создаёт тоннель.")
+	_check(board.lord_cell == lord_before_dig and not board.is_lord_action_active(), "При копании Владыка остаётся на месте.")
 	_check(int(game.call("debug_get_darkness")) == 1, "Обычное копание списывает 1 мрак.")
 
 	var ore_cell := GrayboxBoard.FIRST_ORE_CELL
 	_check(board.can_dig(ore_cell), "Первая клетка руды доступна для раскопки.")
 	game.call("debug_set_darkness", 4)
 	game.call("_on_board_cell_clicked", ore_cell)
-	_finish_lord_action(board)
 	_check(int(game.call("debug_get_darkness")) == 7, "Руда даёт чистый прирост 3 после стоимости копания.")
 
 	game.call("debug_set_darkness", 998)
@@ -96,7 +99,8 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 
 	var prepared_side_cell := Vector2i(GrayboxBoard.ENTRANCE_X - 1, 2)
 	game.call("_on_board_cell_clicked", prepared_side_cell)
-	_finish_lord_action(board)
+	_check(board.is_walkable(prepared_side_cell), "Боковой тоннель прокапывается кликом.")
+	game.call("_set_mode", GrayboxBoard.InteractionMode.MOVE_LORD)
 	game.call("_on_board_cell_clicked", Vector2i(GrayboxBoard.ENTRANCE_X, 2))
 	_finish_lord_action(board)
 	_check(board.lord_cell == Vector2i(GrayboxBoard.ENTRANCE_X, 2), "Клик по пустому тоннелю заставляет Владыку дойти до него.")
@@ -139,9 +143,11 @@ func _test_route_and_economy(packed_scene: PackedScene) -> void:
 
 	var invasion_dig_cell := Vector2i(GrayboxBoard.ENTRANCE_X - 2, 2)
 	game.call("debug_set_darkness", 4)
+	game.call("_set_mode", GrayboxBoard.InteractionMode.DIG)
+	var lord_before_invasion_dig := board.lord_cell
 	game.call("_on_board_cell_clicked", invasion_dig_cell)
-	_finish_lord_action(board)
-	_check(board.lord_cell == invasion_dig_cell and board.is_walkable(invasion_dig_cell), "Во время вторжения Владыка продолжает копать.")
+	_check(board.is_walkable(invasion_dig_cell), "Во время вторжения клетка продолжает прокапываться кликом.")
+	_check(board.lord_cell == lord_before_invasion_dig and not board.is_lord_action_active(), "Копание во время вторжения не перемещает Владыку.")
 
 	game.call("_toggle_pause")
 	game.call("_set_mode", GrayboxBoard.InteractionMode.DIG)
